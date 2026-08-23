@@ -48,7 +48,7 @@ back, a good chain can keep you in the air a very long time.
 
 ## Slopes, planks and water
 
-**Slopes.** Some pieces have a hill. Walk up it normally — then hold **Down**
+**Slopes.** Some pieces have a hill. Run straight up it — then hold **Down**
 on the way over the top and the dumpling throws both arms in the air and
 slides, picking up a *lot* more speed than it can run at. Let go, or reach flat
 ground, and you coast to a stop. It's the fastest way down a hill and it looks
@@ -158,7 +158,9 @@ of course: **12 rows of exactly 16 characters**.
  >  ramp climbing to the right     <  ramp dropping to the right
     Ramps are 45 degrees and one tile each, so a hill is a diagonal staircase
     of them. Every ramp needs a solid tile directly underneath it, or the
-    dumpling falls straight through.
+    dumpling falls straight through. `STEP_UP` is how tall a lip the dumpling
+    walks over without stopping -- it has to stay comfortably under one tile,
+    or you'd be able to stroll up walls.
 ```
 
 Magical carrots aren't placed by hand — the game drops them into suitable
@@ -214,6 +216,7 @@ collection.
 
 The version is shown on the main menu, under the title.
 
+- **v1.4.1** — you can actually walk up the hills now, not just slide down them.
 - **v1.4.0** — slopes you can slide down with your arms in the air, wooden
   planks that give way under you (but not under enemies), water with piranhas,
   a longer star, and a gentler acceleration curve with a wind-up sprint.

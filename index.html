@@ -163,7 +163,7 @@
 "use strict";
 
 /* ------------------------------ constants ------------------------------ */
-const VERSION = "1.4.0";           // major.minor.patch -- bump minor for features
+const VERSION = "1.4.1";           // major.minor.patch -- bump minor for features
 
 const W = 960, H = 540;            // virtual resolution
 const TILE = 45;                   // tile size
@@ -206,6 +206,11 @@ const CARROT_COIN   = 3;     // sky coins are worth more than ground ones
 /* sliding down a slope */
 const SLIDE_ACCEL = 1500;
 const SLIDE_MAX   = 540;
+/* How high a lip the dumpling will just walk over instead of bumping into.
+   A 45-degree ramp puts the front of the body up to half a body-width higher
+   than its middle, so without this you wedge against the next column of a
+   hill and stop dead. */
+const STEP_UP     = 24;
 /* wooden platforms that give way */
 const WOOD_SHAKE  = 0.5;   // warning wobble before it drops
 const WOOD_BACK   = 3.2;   // and how long until it rebuilds itself
@@ -787,17 +792,32 @@ function moveBody(b, dt) {
   if (b.vx !== 0) {
     const dir = Math.sign(b.vx);
     const edge = dir > 0 ? b.x + b.w : b.x;
-    for (let y = b.y + 2; y < b.y + b.h - 2; y += Math.min(TILE - 4, b.h - 4)) {
+    // every height along the leading edge that is inside something solid
+    let blockTop = null;
+    for (let y = b.y + 2; y <= b.y + b.h - 3; y += Math.min(TILE - 4, b.h - 5)) {
       if (isSolidPx(edge, y)) {
-        const col = Math.floor(edge / TILE);
-        b.x = dir > 0 ? col * TILE - b.w - 0.01 : (col + 1) * TILE + 0.01;
-        b.vx = 0; res.wall = true; break;
+        const top = Math.floor(y / TILE) * TILE;
+        if (blockTop === null || top < blockTop) blockTop = top;
       }
     }
-    if (!res.wall && isSolidPx(edge, b.y + b.h - 3)) {
-      const col = Math.floor(edge / TILE);
-      b.x = dir > 0 ? col * TILE - b.w - 0.01 : (col + 1) * TILE + 0.01;
-      b.vx = 0; res.wall = true;
+    if (isSolidPx(edge, b.y + b.h - 3)) {
+      const top = Math.floor((b.y + b.h - 3) / TILE) * TILE;
+      if (blockTop === null || top < blockTop) blockTop = top;
+    }
+    if (blockTop !== null) {
+      const rise = (b.y + b.h) - blockTop;
+      const clear = !isSolidPx(edge, blockTop - 6) &&
+                    !isSolidPx(edge, blockTop - b.h + 4) &&
+                    !isSolidPx(b.x + b.w / 2, blockTop - b.h + 4);
+      if (wasGround && rise > 0 && rise <= STEP_UP && clear) {
+        b.y = blockTop - b.h - 0.01;      // just walk up over the lip
+        if (b.vy > 0) b.vy = 0;
+        res.ground = true;
+      } else {
+        const col = Math.floor(edge / TILE);
+        b.x = dir > 0 ? col * TILE - b.w - 0.01 : (col + 1) * TILE + 0.01;
+        b.vx = 0; res.wall = true;
+      }
     }
   }
   // --- vertical ---
