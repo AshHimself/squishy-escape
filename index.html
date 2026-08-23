@@ -1,0 +1,1850 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Squishy Escape</title>
+<style>
+  :root{
+    --pink:#ffd6e8; --mint:#d8f5e6; --lav:#e4dbff; --lemon:#fff2c4; --sky:#d9ecff;
+    --ink:#5a4a66; --ink-soft:#8a7a96; --card:#fffdf9;
+    --shadow:0 6px 0 rgba(90,74,102,.18), 0 12px 30px rgba(90,74,102,.16);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html,body{height:100%;margin:0;overscroll-behavior:none}
+  body{
+    background:
+      radial-gradient(1200px 600px at 20% -10%, #fff 0%, transparent 60%),
+      linear-gradient(160deg,var(--sky),var(--lav) 45%,var(--pink));
+    font-family:ui-rounded,"SF Pro Rounded",Nunito,"Segoe UI Variable",system-ui,sans-serif;
+    color:var(--ink);
+    display:grid; place-items:center;
+    overflow:hidden;
+    user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;
+    touch-action:none;
+  }
+  #stage{
+    position:relative;
+    touch-action:none;
+    width:min(100vw, calc(100vh * 16 / 9));
+    aspect-ratio:16/9;
+    border-radius:18px;
+    overflow:hidden;
+    box-shadow:0 20px 60px rgba(90,74,102,.35);
+    background:#e9f4ff;
+  }
+  canvas{display:block;width:100%;height:100%}
+
+  .layer{position:absolute;inset:0;pointer-events:none}
+  .layer > *{pointer-events:auto}
+
+  /* ---------- in-run HUD ---------- */
+  #hud{display:none;padding:2.2% 2.6%;font-weight:800}
+  #hud.on{display:block}
+  .hudrow{display:flex;align-items:center;gap:1.2em;justify-content:space-between}
+  .pill{
+    background:rgba(255,253,249,.86); border-radius:999px;
+    padding:.35em .85em; font-size:clamp(10px,1.9vmin,20px);
+    box-shadow:0 3px 0 rgba(90,74,102,.12);
+    display:flex;align-items:center;gap:.45em; white-space:nowrap;
+  }
+  #hearts{letter-spacing:.08em;font-size:clamp(12px,2.4vmin,26px)}
+
+  /* ---------- menus ---------- */
+  #menu{display:grid;place-items:center;background:rgba(255,247,252,.55);backdrop-filter:blur(3px)}
+  #menu.off{display:none}
+  .sheet{
+    width:min(86%,720px); max-height:88%; overflow:auto;
+    background:var(--card); border-radius:22px; padding:clamp(14px,2.6vmin,28px);
+    box-shadow:var(--shadow); text-align:center;
+  }
+  .sheet::-webkit-scrollbar{width:8px}
+  .sheet::-webkit-scrollbar-thumb{background:var(--lav);border-radius:99px}
+  h1{
+    margin:.1em 0 .05em; font-size:clamp(22px,5.4vmin,54px); letter-spacing:-.02em;
+    background:linear-gradient(90deg,#ff9fc4,#ffca7a,#8fe0c0,#8fb8f0,#c9a0f0);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  h2{margin:.1em 0 .5em;font-size:clamp(16px,3.2vmin,30px)}
+  p.sub{margin:.2em 0 1em;color:var(--ink-soft);font-size:clamp(11px,2vmin,17px);font-weight:600}
+  .stats{display:flex;gap:.5em;justify-content:center;flex-wrap:wrap;margin:.6em 0 1em}
+  .stat{background:var(--mint);border-radius:14px;padding:.5em .8em;font-weight:800;font-size:clamp(11px,2vmin,17px)}
+  .stat b{display:block;font-size:clamp(14px,2.8vmin,24px)}
+  .stat.money{background:var(--lemon)} .stat.egg{background:var(--lav)} .stat.book{background:var(--pink)}
+  .btns{display:flex;flex-wrap:wrap;gap:.6em;justify-content:center}
+  button{
+    font:inherit;font-weight:900;cursor:pointer;border:0;color:var(--ink);
+    background:var(--lav); border-radius:16px;
+    padding:.62em 1.15em; font-size:clamp(12px,2.2vmin,19px);
+    box-shadow:0 4px 0 rgba(90,74,102,.2); transition:transform .06s, box-shadow .06s, filter .12s;
+  }
+  button:hover{filter:brightness(1.04)}
+  button:active{transform:translateY(3px);box-shadow:0 1px 0 rgba(90,74,102,.2)}
+  button.primary{background:linear-gradient(120deg,#ffd0e4,#ffe6b8);font-size:clamp(14px,2.8vmin,24px);padding:.7em 1.6em}
+  button:disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.5)}
+  button.small{padding:.42em .8em;font-size:clamp(10px,1.8vmin,15px);border-radius:12px;background:var(--mint)}
+  .cost{font-weight:700;opacity:.75;font-size:.85em}
+
+  /* ---------- collection grid ---------- */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:.5em;margin:.4em 0 .8em}
+  .cell{
+    background:#f6f2fb;border-radius:14px;padding:.45em .2em .5em;position:relative;
+    display:flex;flex-direction:column;align-items:center;gap:.15em;
+  }
+  .cell.have{background:#fff}
+  .cell.equipped{outline:3px solid #ffb0d0}
+  .cell canvas{width:54px;height:54px}
+  .cell .nm{font-size:10px;font-weight:800;line-height:1.15}
+  .cell .rr{font-size:9px;font-weight:800;opacity:.8}
+  .cell .ct{position:absolute;top:3px;right:6px;font-size:10px;font-weight:900;opacity:.6}
+  .cell.locked .nm{opacity:.35}
+  .tradeRow{display:flex;align-items:center;justify-content:space-between;gap:.6em;background:#f6f2fb;border-radius:14px;padding:.5em .7em;margin-bottom:.4em;font-weight:800;font-size:clamp(10px,1.9vmin,16px);text-align:left}
+  .odds{display:flex;gap:.35em;justify-content:center;flex-wrap:wrap;margin:.3em 0 .7em}
+  .odds span{background:#f4f0fa;border-radius:10px;padding:.3em .55em;font-size:clamp(9px,1.7vmin,14px);font-weight:800}
+
+  /* ---------- touch controls ---------- */
+  #touch{display:none;position:absolute;inset:auto 0 0 0;justify-content:space-between;
+    padding:0 2.5% calc(2.4% + env(safe-area-inset-bottom,0px))}
+  body.touch #touch.on{display:flex}
+  .tbtn{
+    width:17vmin;height:17vmin;max-width:112px;max-height:112px;border-radius:50%;
+    touch-action:none;
+    background:rgba(255,253,249,.62);box-shadow:0 4px 0 rgba(90,74,102,.18);
+    display:grid;place-items:center;font-size:5vmin;font-weight:900;color:var(--ink);
+  }
+  .tbtn:active{background:rgba(255,253,249,.9)}
+  #tcMove{display:flex;gap:1.6vmin}
+  #corner{position:absolute;inset:0 0 auto auto;padding:1.4% 1.6%;display:flex;gap:.4em;align-items:flex-start}
+  #corner button{padding:.35em .6em;font-size:clamp(10px,1.7vmin,15px);background:rgba(255,253,249,.8);border-radius:12px}
+  #btnPause{display:none} body.playing #btnPause{display:block}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="game"></canvas>
+
+  <div class="layer" id="hud">
+    <div class="hudrow">
+      <div class="pill"><span id="hearts">💗💗💗</span></div>
+      <div class="pill">🪙 <span id="hudMoney">0</span> <span style="opacity:.55">Dumpleningness</span></div>
+      <div class="pill">📏 <span id="hudDist">0</span> m</div>
+    </div>
+  </div>
+
+  <div class="layer" id="touch">
+    <div id="tcMove">
+      <div class="tbtn" id="tcLeft">◀</div>
+      <div class="tbtn" id="tcRight">▶</div>
+    </div>
+    <div class="tbtn" id="tcJump">⤴</div>
+  </div>
+
+  <div class="layer" id="corner">
+    <button id="btnPause" title="Pause">❚❚</button>
+    <button id="btnMute" title="Sound">🔊</button>
+  </div>
+
+  <div class="layer" id="menu"><div class="sheet" id="sheet"></div></div>
+</div>
+<script>
+/* =====================================================================
+   SQUISHY ESCAPE
+   by Annie Smith, Ash Smith & Computer Smith
+   ---------------------------------------------------------------------
+   A 2D side-scroller. Run right, jump obstacles, stomp the 6-7s, outrun
+   the squish wall, spend Dumpleningness on better eggs, hatch rarer
+   squishies, trade duplicates up with the Squishy Trader.
+   ===================================================================== */
+(() => {
+"use strict";
+
+/* ------------------------------ constants ------------------------------ */
+const W = 960, H = 540;            // virtual resolution
+const TILE = 45;                   // tile size
+const ROWS = 12;                   // rows per chunk (12 * 45 = 540)
+const COLS = 16;                   // columns per chunk
+const CHUNK_W = COLS * TILE;       // 720px of course per chunk
+
+const GRAVITY      = 2200;
+const JUMP_V       = 780;
+const JUMP_CUT     = 0.45;   // release jump early -> shorter hop
+const RUN_ACCEL    = 2800;
+const AIR_ACCEL    = 1700;
+const FRICTION     = 3200;
+const MAX_RUN      = 335;
+const MAX_FALL     = 1050;
+const COYOTE       = 0.10;   // grace period after walking off a ledge
+const DOUBLE_V     = 0.86;   // the mid-air bounce, as a fraction of a full jump
+const JUMP_BUFFER  = 0.12;   // press jump slightly early and it still fires
+const STOMP_BOUNCE = 625;
+const IFRAMES      = 1.4;
+
+const WALL_BASE  = 72;    // squish wall speed at the start (px/s)
+const WALL_GAIN  = 0.055; // ...plus this much per metre travelled
+const WALL_MAX   = 265;
+const WALL_LEASH = 950;   // if you get further ahead than this, it speeds up
+
+/* ------------------------------- save file ------------------------------ */
+const SAVE_KEY = "squishyEscape.save.v1";
+const freshSave = () => ({
+  money: 0, eggTier: 1, counts: {}, equipped: null,
+  bestDist: 0, bestMoney: 0, runs: 0, seenIntro: false, muted: false, touchUI: false
+});
+let save = (() => {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    return raw ? Object.assign(freshSave(), JSON.parse(raw)) : freshSave();
+  } catch (e) { return freshSave(); }
+})();
+function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} }
+
+/* --------------------------------- audio -------------------------------- */
+let actx = null;
+function audioOn() {
+  if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  if (actx && actx.state === "suspended") actx.resume();
+  if (actx && MUSIC.master === null) { MUSIC.init(); MUSIC.gain(); }
+}
+function sfx(freq, dur, type = "square", vol = 0.07, slide = 0) {
+  if (!actx || save.muted) return;
+  const t = actx.currentTime;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t);
+  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t + dur);
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+  o.connect(g); g.connect(actx.destination);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+const S = {
+  jump:  () => sfx(420, 0.16, "square",   0.05,  260),
+  double:() => { sfx(560, 0.13, "square", 0.05, 340); setTimeout(() => sfx(840, 0.1, "triangle", 0.04, 220), 45); },
+  land:  () => sfx(180, 0.06, "sine",     0.04, -60),
+  coin:  () => { sfx(880, 0.07, "triangle", 0.05); setTimeout(() => sfx(1320, 0.09, "triangle", 0.045), 55); },
+  stomp: () => sfx(260, 0.13, "sawtooth", 0.055, -170),
+  hurt:  () => sfx(300, 0.28, "sawtooth", 0.07, -220),
+  click: () => sfx(600, 0.05, "sine", 0.04),
+  crack: () => sfx(220, 0.08, "square", 0.06, 120),
+  hatch: () => [0, 90, 180, 300].forEach((d, i) => setTimeout(() => sfx([523, 659, 784, 1046][i], 0.22, "triangle", 0.06), d))
+};
+
+
+/* ==========================================================================
+   8-BIT MUSIC
+   No audio files -- every note is synthesised from oscillators and noise.
+   Five sections, all of them cheerful and major-key. The hub is a gentle
+   version; once you're running, the music steps up a section each time the
+   obstacle course unlocks a harder tier of chunks -- a bit quicker and a bit
+   busier each time, but always happy. Sections only change on the bar.
+   ========================================================================== */
+const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+
+/* kick/snare/hat use "x" for hit, "." for rest, over 16 sixteenth-notes */
+const SECTIONS = {
+  hub: { bpm: 96, wave: "triangle", arp: false, swing: 0.06,
+    lead: [72, null, null, 76, null, null, 79, null, 76, null, null, 72, null, 74, null, null],
+    roots: [48, 48, 53, 55], bassEvery: 8,
+    kick: "................", snare: "................", hat: "................" },
+  0: { bpm: 112, wave: "square", arp: false, swing: 0.05,
+    lead: [72, null, 76, null, 79, null, 76, null, 74, null, 72, null, 74, null, 76, null],
+    roots: [48, 48, 53, 55], bassEvery: 4,
+    kick: "x...x...x...x...", snare: "................", hat: "..x...x...x...x." },
+  1: { bpm: 120, wave: "square", arp: true, swing: 0.04,
+    lead: [79, null, 76, 79, 81, null, 79, 76, 74, null, 76, 74, 72, null, 74, 76],
+    roots: [48, 53, 55, 53], bassEvery: 4,
+    kick: "x...x...x...x...", snare: "....x.......x...", hat: "..x...x...x...x." },
+  2: { bpm: 128, wave: "square", arp: true, swing: 0.03,
+    lead: [81, 79, 76, 79, 84, 81, 79, 76, 74, 76, 79, 76, 72, 74, 76, 79],
+    roots: [48, 53, 55, 55], bassEvery: 2,
+    kick: "x..x..x.x..x..x.", snare: "....x.......x...", hat: "x.x.x.x.x.x.x.x." },
+  3: { bpm: 138, wave: "square", arp: true, swing: 0.03,
+    lead: [84, 81, 79, 81, 84, 86, 84, 81, 79, 76, 74, 76, 79, 81, 84, 86],
+    roots: [48, 53, 55, 48], bassEvery: 2,
+    kick: "x..x..x.x..x..x.", snare: "....x.......x...", hat: "x.x.x.x.x.x.x.x." }
+};
+
+const MUSIC = {
+  master: null, noise: null, timer: null,
+  mode: "off", sec: SECTIONS.hub, step: 0, next: 0, level: -1,
+
+  init() {
+    if (!actx || this.master) return;
+    this.master = actx.createGain();
+    this.master.gain.value = save.muted ? 0 : 0.5;
+    this.master.connect(actx.destination);
+    const b = actx.createBuffer(1, actx.sampleRate * 0.4, actx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    this.noise = b;
+  },
+  gain() { if (this.master) this.master.gain.value = save.muted ? 0 : 0.5; },
+
+  setMode(m) {
+    if (m !== "off") { audioOn(); this.init(); }
+    if (!this.master) { this.mode = m; return; }
+    if (this.mode === m) return;
+    this.mode = m;
+    if (m === "off") { clearInterval(this.timer); this.timer = null; return; }
+    this.level = -1;
+    this.pickSection();
+    this.step = 0;
+    this.next = actx.currentTime + 0.06;
+    if (!this.timer) this.timer = setInterval(() => this.tick(), 25);
+  },
+
+  /* which section should be playing right now */
+  pickSection() {
+    if (this.mode === "hub") { this.sec = SECTIONS.hub; this.level = -1; return; }
+    // these thresholds line up with where the course unlocks harder chunks
+    const lvl = run.dist < 80 ? 0 : run.dist < 176 ? 1 : run.dist < 320 ? 2 : 3;
+    if (lvl !== this.level) { this.level = lvl; this.sec = SECTIONS[lvl]; }
+  },
+
+  tick() {
+    if (!actx || this.mode === "off") return;
+    const ahead = actx.currentTime + 0.15;
+    let guard = 0;
+    while (this.next < ahead && guard++ < 60) {
+      this.playStep(this.next, this.step);
+      const sixteenth = 60 / this.sec.bpm / 4;
+      // a touch of swing on the calmer sections
+      this.next += sixteenth * (this.step % 2 ? 1 - this.sec.swing : 1 + this.sec.swing);
+      this.step = (this.step + 1) % 16;
+      if (this.step === 0) this.pickSection();   // only ever change section on the bar
+    }
+  },
+
+  playStep(t, i) {
+    const S2 = this.sec, beat = (i / 4) | 0, root = S2.roots[beat];
+    const dur = 60 / S2.bpm / 4;
+
+    if (S2.lead[i] != null) this.tone(t, S2.lead[i], dur * 1.7, 0.055, S2.wave);
+    if (i % S2.bassEvery === 0) this.bass(t, root - 12, dur * 1.6, 0.055);
+    if (S2.arp) this.tone(t, root + [12, 19, 24, 19][i % 4], dur * 0.8, 0.022, "square");
+    if (S2.kick[i]  === "x") this.kick(t, 0.085);
+    if (S2.snare[i] === "x") this.hit(t, 0.095, 0.045, 1500, "bandpass");
+    if (S2.hat[i]   === "x") this.hit(t, 0.035, 0.018, 7200, "highpass");
+  },
+
+  tone(t, midi, dur, vol, type) {
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.setValueAtTime(mtof(midi), t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + dur + 0.03);
+  },
+  bass(t, midi, dur, vol) {
+    const o = actx.createOscillator(), g = actx.createGain(), f = actx.createBiquadFilter();
+    o.type = "square"; f.type = "lowpass"; f.frequency.value = 820;
+    o.frequency.setValueAtTime(mtof(midi), t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    o.connect(f); f.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + dur + 0.03);
+  },
+  kick(t, vol) {
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(155, t);
+    o.frequency.exponentialRampToValueAtTime(46, t + 0.11);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + 0.14);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + 0.17);
+  },
+  hit(t, vol, dur, freq, type) {
+    const src = actx.createBufferSource(), g = actx.createGain(), f = actx.createBiquadFilter();
+    src.buffer = this.noise;
+    f.type = type; f.frequency.value = freq; f.Q.value = type === "bandpass" ? 1.2 : 0.7;
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    src.connect(f); f.connect(g); g.connect(this.master);
+    src.start(t); src.stop(t + dur + 0.02);
+  },
+
+  /* short riff when a run ends */
+  stinger() {
+    if (!this.master || save.muted) return;
+    const t0 = actx.currentTime + 0.05;
+    [[72, 0], [76, 0.12], [79, 0.24], [84, 0.36]].forEach(([m, d]) =>
+      this.tone(t0 + d, m, d === 0.36 ? 0.5 : 0.16, 0.06, "square"));
+  }
+};
+
+/* -------------------------------- squishies ----------------------------- */
+const RARITY = ["Common", "Uncommon", "Rare", "Super Rare"];
+const RARITY_BG = ["#d8f5e6", "#d9ecff", "#e4dbff", "#ffe3c2"];
+const RARITY_INK = ["#3f8f74", "#3f72b8", "#7b53c4", "#c07a24"];
+
+// shape: how the little guy is drawn. c1 = body, c2 = shading/detail.
+const SQUISHIES = [
+  { id:"plain",   name:"Plain Dumpling",  r:0, shape:"dumpling", c1:"#fff4e8", c2:"#ffd9be" },
+  { id:"bao",     name:"Bao Buddy",       r:0, shape:"round",    c1:"#fffaf6", c2:"#ffd2e2" },
+  { id:"mochi",   name:"Mochi Mini",      r:0, shape:"round",    c1:"#dff7ec", c2:"#a9e3cd" },
+  { id:"butter",  name:"Butter Blob",     r:0, shape:"block",    c1:"#fff0b8", c2:"#f2d477" },
+  { id:"rice",    name:"Rice Ball",       r:0, shape:"dumpling", c1:"#ffffff", c2:"#cfd8e8" },
+  { id:"straw",   name:"Strawberry Swirl",r:1, shape:"berry",    c1:"#ffb3c6", c2:"#ff7d9e" },
+  { id:"banana",  name:"Banana Bop",      r:1, shape:"banana",   c1:"#ffe89a", c2:"#e8c65a" },
+  { id:"cheese",  name:"Cheese Chunk",    r:1, shape:"cheese",   c1:"#ffdf8a", c2:"#efc35c" },
+  { id:"paw",     name:"Paw Pal",         r:1, shape:"paw",      c1:"#ffd8e6", c2:"#f5aac6" },
+  { id:"cloud",   name:"Cloud Puff",      r:1, shape:"cloud",    c1:"#f2f8ff", c2:"#cfe2f7" },
+  { id:"ring",    name:"Fidget Ring King",r:2, shape:"ring",     c1:"#bff0e2", c2:"#7fd6c0" },
+  { id:"galaxy",  name:"Galaxy Gyoza",    r:2, shape:"dumpling", c1:"#6b5aa6", c2:"#3d3170", stars:true },
+  { id:"rainbow", name:"Rainbow Roll",    r:2, shape:"round",    c1:"#ffd6e8", c2:"#c9e8ff", rainbow:true },
+  { id:"sherbet", name:"Sherbet Star",    r:2, shape:"star",     c1:"#ffd0a8", c2:"#ff9f7a" },
+  { id:"prisma",  name:"Prisma Dumpling", r:3, shape:"dumpling", c1:"#ffe8f4", c2:"#cfe6ff", rainbow:true, shine:true },
+  { id:"golden",  name:"Golden Dumplen",  r:3, shape:"round",    c1:"#ffe07a", c2:"#e0a516", shine:true },
+  { id:"cosmic",  name:"Cosmic Squish",   r:3, shape:"star",     c1:"#8f7ad6", c2:"#4b3b8f", stars:true, shine:true }
+];
+const byId = id => SQUISHIES.find(s => s.id === id);
+
+// Egg tiers: nicer egg -> better odds. [Common, Uncommon, Rare, Super Rare]
+const EGGS = [
+  { name:"Common Egg",     odds:[75, 20, 4.5, 0.5], upgrade:120  },
+  { name:"Uncommon Egg",   odds:[55, 32, 11,  2  ], upgrade:320  },
+  { name:"Rare Egg",       odds:[35, 38, 21,  6  ], upgrade:800  },
+  { name:"Super Rare Egg", odds:[18, 34, 33,  15 ], upgrade:1800 },
+  { name:"Legendary Egg",  odds:[5,  25, 40,  30 ], upgrade:null }
+];
+const HATCH_COST = 30;
+const eggDef = () => EGGS[Math.min(save.eggTier, EGGS.length) - 1];
+
+function rollSquishy() {
+  const odds = eggDef().odds;
+  let r = Math.random() * odds.reduce((a, b) => a + b, 0), tier = 0;
+  for (let i = 0; i < odds.length; i++) { if (r < odds[i]) { tier = i; break; } r -= odds[i]; }
+  return pickOfRarity(tier);
+}
+function pickOfRarity(tier) {
+  const pool = SQUISHIES.filter(s => s.r === tier);
+  return pool[(Math.random() * pool.length) | 0];
+}
+function grant(sq) {
+  save.counts[sq.id] = (save.counts[sq.id] || 0) + 1;
+  if (!save.equipped) save.equipped = sq.id;
+  persist();
+}
+const owned = id => (save.counts[id] || 0) > 0;
+const distinctOwned = () => SQUISHIES.filter(s => owned(s.id)).length;
+// spare copies of a rarity = everything beyond the first of each species
+const dupesOfRarity = t => SQUISHIES.filter(s => s.r === t)
+  .reduce((n, s) => n + Math.max(0, (save.counts[s.id] || 0) - 1), 0);
+
+/* --------------------------------- input -------------------------------- */
+const keys = Object.create(null);
+const input = { left:false, right:false, jumpHeld:false, jumpPressed:false };
+function setJump(down) {
+  if (down && !input.jumpHeld) input.jumpPressed = true;
+  input.jumpHeld = down;
+}
+addEventListener("keydown", e => {
+  if (e.repeat) return;
+  audioOn();
+  keys[e.code] = true;
+  if (["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) e.preventDefault();
+  if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") setJump(true);
+  if (e.code === "KeyM") toggleMute();
+  if ((e.code === "KeyP" || e.code === "Escape") && (game.state === "play" || game.state === "paused")) togglePause();
+});
+addEventListener("keyup", e => {
+  keys[e.code] = false;
+  if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") setJump(false);
+});
+addEventListener("blur", () => { for (const k in keys) keys[k] = false; input.jumpHeld = false; });
+
+function pollInput() {
+  input.left  = !!(keys.ArrowLeft  || keys.KeyA) || touchState.left;
+  input.right = !!(keys.ArrowRight || keys.KeyD) || touchState.right;
+}
+const touchState = { left:false, right:false };
+/* Don't trust a one-shot sniff -- iPadOS Safari defaults to "Request Desktop
+   Website", where `ontouchstart` is false. Guess up front, but the real trigger
+   is the first actual touch, and we remember it for next time. */
+function enableTouchUI() {
+  if (document.body.classList.contains("touch")) return;
+  document.body.classList.add("touch");
+  if (!save.touchUI) { save.touchUI = true; persist(); }
+}
+if (save.touchUI || "ontouchstart" in window || navigator.maxTouchPoints > 0) {
+  document.body.classList.add("touch");
+}
+addEventListener("touchstart", enableTouchUI, { passive: true, capture: true });
+addEventListener("pointerdown", e => { if (e.pointerType === "touch") enableTouchUI(); },
+                 { passive: true, capture: true });
+function bindTouch(el, on, off) {
+  el.addEventListener("touchstart", e => { e.preventDefault(); audioOn(); on(); }, { passive:false });
+  el.addEventListener("touchend",   e => { e.preventDefault(); off(); }, { passive:false });
+  el.addEventListener("touchcancel",e => { e.preventDefault(); off(); }, { passive:false });
+}
+bindTouch(document.getElementById("tcLeft"),  () => touchState.left = true,  () => touchState.left = false);
+bindTouch(document.getElementById("tcRight"), () => touchState.right = true, () => touchState.right = false);
+bindTouch(document.getElementById("tcJump"),  () => setJump(true),           () => setJump(false));
+
+/* ==========================================================================
+   COURSE CHUNKS
+   Each template is 16 columns x 12 rows of the obstacle course. Edit these
+   freely -- every row MUST be exactly 16 characters, and column 0 and 15 of
+   the bottom row must stay solid so chunks join up.
+     .  nothing        #  ground block     C  cheese block (solid)
+     o  coin           D  dumpling         S  strawberry
+     P  paw            N  banana           B  butter
+     R  fidget ring (floats + bobs)        6 / 7  the 6-7s
+   tier: 0 = gentle, 3 = mean. Higher tiers unlock the further you run.
+   ========================================================================== */
+const TEMPLATES = [
+/* ---- tier 0: gentle ---- */
+{ tier:0, rows:[  // opening stretch
+"................","................","................","................",
+"................","................","................","................",
+"......ooo.......","................","................","################"]},
+{ tier:0, rows:[  // first steps
+"................","................","................","................",
+"................","................","................","................",
+".....ooo........","....#####.......","..........##....","################"]},
+{ tier:0, rows:[  // meet the 6-7s
+"................","................","................","................",
+"................","................","................","................",
+".....o....o.....","................",".....6.....7....","################"]},
+{ tier:0, rows:[  // snack hazards
+"................","................","................","................",
+"................","................","................","................",
+"...o...o...o....","................","...D...S...P....","################"]},
+{ tier:0, rows:[  // little hop
+"................","................","................","................",
+"................","................","................","................",
+".....ooo........","................","................","#####....#######"]},
+/* ---- tier 1 ---- */
+{ tier:1, rows:[  // stomp chain -- bounce along the row for a combo
+"................","................","................","................",
+"................","................","................","................",
+".......ooo......","................","...6..6..6..7...","################"]},
+{ tier:1, rows:[  // up and over
+"................","................","................","................",
+"................","................",".........ooo....","........#####...",
+"................","...####.........",".............6..","################"]},
+{ tier:1, rows:[  // cheese steps
+"................","................","................","................",
+"................","................","................","...........oo...",
+"...........CC...","........CC......",".....CC.........","################"]},
+{ tier:1, rows:[  // butter slide
+"................","................","................","................",
+"................","................","................","................",
+"..o.....o....o..","................","..B.....B....B..","################"]},
+{ tier:1, rows:[  // high road
+"................","................","................","................",
+"................","................","................","....ooooo.......",
+"................","...#######......","..........6.....","################"]},
+{ tier:1, rows:[  // two little gaps
+"................","................","................","................",
+"................","................","................","................",
+"................",".....o......o...","................","#####...####...#"]},
+/* ---- tier 2 ---- */
+{ tier:2, rows:[  // 6-7s on patrol
+"................","................","................","................",
+"................","................",".........7......","........###.....",
+"...6............","..####..........",".........D......","################"]},
+{ tier:2, rows:[  // coins over the gap
+"................","................","................","................",
+"................","................","................","................",
+"................","......oooo......","..6..........7..","######....######"]},
+{ tier:2, rows:[  // a pair of fidget rings
+"................","................","................","................",
+"................",".....R....R.....","................","................",
+".......ooo......","................","....6......7....","################"]},
+{ tier:2, rows:[  // staircase up
+"................","................","................","................",
+"................","................",".............o..",".......o.....##.",
+"..........##....",".......##.......","....##..........","################"]},
+{ tier:2, rows:[  // pit with an island
+"................","................","................","................",
+"................","................","................","................",
+"................",".....ooo........","................","####..##...#####"]},
+/* ---- tier 3: mean ---- */
+{ tier:3, rows:[  // stepping stones patrolled by 6-7s
+"................","................","................","................",
+"................","................","................","................",
+"...ooo....ooo...","................","..6.....6.....7.","####..####..####"]},
+{ tier:3, rows:[  // ring alley
+"................","................","................","..R..R..R..R....",
+"................","................","................","................",
+"....ooo.........","................","...N.......6....","################"]},
+{ tier:3, rows:[  // the gauntlet
+"................","................","................","................",
+".....R.....R....","................","................",".......o........",
+"................","...##......##...","..D..6..N..7..P.","################"]},
+{ tier:3, rows:[  // double gap
+"................","................","................","................",
+"................","................","................","................",
+"..ooo......ooo..","................","................","####...####...##"]},
+{ tier:3, rows:[  // high wire
+"................","................","................","................",
+"................","................","................","......oooo......",
+".....6....7.....","..############..","................","################"]},
+{ tier:3, rows:[  // paw path
+"................","................","................","................",
+"................","................","................","................",
+"..o...o...o...o.","................",".P...P...P...P..","################"]},
+{ tier:3, rows:[  // cheese tower
+"................","................","................","................",
+"................","................","..............o.","...........CC...",
+"........CC......",".....CC.........","..CC.........6..","################"]},
+{ tier:3, rows:[  // sprint
+"................","................","................","................",
+"................","................","................","................",
+"...o.o.o.o.o.o..","................",".......7........","################"]}
+];
+
+/* ------------------------------ world state ----------------------------- */
+const world = {
+  tiles: new Map(),   // chunk index -> array of 12 strings (solids only)
+  built: -1,          // highest chunk index generated so far
+  coins: [], hazards: [], enemies: [], rings: [], parts: [], texts: []
+};
+
+function resetWorld() {
+  world.tiles.clear(); world.built = -1;
+  world.coins.length = world.hazards.length = 0;
+  world.enemies.length = world.rings.length = world.parts.length = world.texts.length = 0;
+  for (let i = 0; i <= 3; i++) buildChunk(i);
+}
+
+function pickTemplate(index) {
+  // gentle intro, then let harder tiers into the pool as you get further out
+  if (index <= 1) return TEMPLATES[0];
+  const maxTier = index < 5 ? 0 : index < 11 ? 1 : index < 20 ? 2 : 3;
+  const pool = TEMPLATES.filter(t => t.tier <= maxTier);
+  // bias toward the nastiest tier currently unlocked
+  const hot = pool.filter(t => t.tier === maxTier);
+  const use = (maxTier > 0 && Math.random() < 0.55) ? hot : pool;
+  return use[(Math.random() * use.length) | 0];
+}
+
+function buildChunk(index) {
+  if (world.tiles.has(index)) return;
+  const tpl = pickTemplate(index);
+  const solid = [];
+  for (let r = 0; r < ROWS; r++) {
+    let line = "";
+    for (let c = 0; c < COLS; c++) {
+      const ch = tpl.rows[r][c];
+      const wx = index * CHUNK_W + c * TILE, wy = r * TILE;
+      switch (ch) {
+        case "o": world.coins.push({ x:wx + TILE/2, y:wy + TILE/2, got:false, t:Math.random()*6 }); break;
+        case "D": case "S": case "P": case "N": case "B":
+          world.hazards.push({ x:wx + TILE/2, y:wy + TILE - 17, kind:ch, t:Math.random()*6 }); break;
+        case "R": world.rings.push({ x:wx + TILE/2, y:wy + TILE/2, base:wy + TILE/2, a:Math.random()*6.28 }); break;
+        case "6": world.enemies.push(makeEnemy(wx + TILE/2, wy + TILE, "6")); break;
+        case "7": world.enemies.push(makeEnemy(wx + TILE/2, wy + TILE, "7")); break;
+      }
+      line += (ch === "#" || ch === "C") ? ch : ".";
+    }
+    solid.push(line);
+  }
+  world.tiles.set(index, solid);
+  world.built = Math.max(world.built, index);
+}
+
+function makeEnemy(cx, footY, kind) {
+  return {
+    x: cx - 17, y: footY - 36, w: 34, h: 36,
+    vx: (Math.random() < 0.5 ? -1 : 1) * (kind === "6" ? 62 : 40), vy: 0,
+    kind, onGround: false, hopT: 0.4 + Math.random(), dead: 0, t: Math.random() * 6
+  };
+}
+
+/* tile char at a world pixel; anything off the top/bottom or before the
+   start of the course is treated as empty (falling off = lose a heart). */
+function tileAtPx(px, py) {
+  const row = Math.floor(py / TILE);
+  if (row < 0 || row >= ROWS) return ".";
+  const col = Math.floor(px / TILE);
+  const ci = Math.floor(col / COLS);
+  if (ci < 0) return row === ROWS - 1 ? "#" : ".";
+  const t = world.tiles.get(ci);
+  if (!t) return ".";
+  return t[row][col - ci * COLS] || ".";
+}
+const isSolidPx = (px, py) => { const c = tileAtPx(px, py); return c === "#" || c === "C"; };
+
+/* Axis-separated AABB vs tile collision. Returns what it bumped into. */
+function moveBody(b, dt) {
+  const res = { ground:false, ceil:false, wall:false };
+  // --- horizontal ---
+  b.x += b.vx * dt;
+  if (b.vx !== 0) {
+    const dir = Math.sign(b.vx);
+    const edge = dir > 0 ? b.x + b.w : b.x;
+    for (let y = b.y + 2; y < b.y + b.h - 2; y += Math.min(TILE - 4, b.h - 4)) {
+      if (isSolidPx(edge, y)) {
+        const col = Math.floor(edge / TILE);
+        b.x = dir > 0 ? col * TILE - b.w - 0.01 : (col + 1) * TILE + 0.01;
+        b.vx = 0; res.wall = true; break;
+      }
+    }
+    if (!res.wall && isSolidPx(edge, b.y + b.h - 3)) {
+      const col = Math.floor(edge / TILE);
+      b.x = dir > 0 ? col * TILE - b.w - 0.01 : (col + 1) * TILE + 0.01;
+      b.vx = 0; res.wall = true;
+    }
+  }
+  // --- vertical ---
+  b.vy = Math.min(b.vy + GRAVITY * dt, MAX_FALL);
+  b.y += b.vy * dt;
+  const edgeY = b.vy > 0 ? b.y + b.h : b.y;
+  for (let x = b.x + 3; x <= b.x + b.w - 3; x += Math.min(TILE - 6, b.w - 6)) {
+    if (isSolidPx(x, edgeY)) {
+      const row = Math.floor(edgeY / TILE);
+      if (b.vy > 0) { b.y = row * TILE - b.h - 0.01; res.ground = true; }
+      else          { b.y = (row + 1) * TILE + 0.01; res.ceil = true; }
+      b.vy = 0; break;
+    }
+  }
+  if (!res.ground && b.vy > 0 && isSolidPx(b.x + b.w - 3, b.y + b.h)) {
+    const row = Math.floor((b.y + b.h) / TILE);
+    b.y = row * TILE - b.h - 0.01; b.vy = 0; res.ground = true;
+  }
+  return res;
+}
+
+/* ==========================================================================
+   THE RUN
+   ========================================================================== */
+const game   = { state:"hub", t:0, shake:0, hatch:null };
+const player = { x:100, y:455, w:30, h:40, vx:0, vy:0, prevY:455, onGround:false,
+                 face:1, coyote:0, buffer:0, iframes:0, hearts:3, anim:0, squash:0, combo:0, airJumps:1 };
+const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, over:false, endT:0 };
+const trail  = [];   // breadcrumb positions so the companion squishy can follow
+
+function startRun() {
+  audioOn();
+  resetWorld();
+  player.x = 100; player.y = 455; player.vx = player.vy = 0; player.prevY = 455;
+  player.onGround = true; player.face = 1; player.coyote = COYOTE; player.buffer = 0;
+  player.iframes = 0; player.hearts = 3; player.anim = 0; player.squash = 0; player.combo = 0; player.airJumps = 1;
+  run.money = run.coins = run.stomps = run.dist = 0;
+  run.maxX = 100; run.wallX = -420; run.camX = 0; run.over = false; run.endT = 0;
+  trail.length = 0;
+  game.state = "play"; game.shake = 0;
+  showMenu(null);
+  setPlayUI(true);
+  MUSIC.setMode("run");
+}
+
+/* hearts/coins readout, the on-screen buttons and the pause button all appear
+   together for the length of a run */
+function setPlayUI(on) {
+  document.getElementById("hud").classList.toggle("on", on);
+  document.getElementById("touch").classList.toggle("on", on);
+  document.body.classList.toggle("playing", on);
+}
+
+function endRun(cause) {
+  if (run.over) return;
+  run.over = true; run.endT = 0;
+  game.shake = 16;
+  MUSIC.setMode("off"); MUSIC.stinger();
+  const bonus = Math.floor(run.dist / 5);
+  run.money += bonus; run.bonus = bonus; run.cause = cause;
+  save.money += run.money;
+  save.runs++;
+  save.bestDist  = Math.max(save.bestDist, run.dist);
+  save.bestMoney = Math.max(save.bestMoney, run.money);
+  persist();
+}
+
+function hurt() {
+  if (player.iframes > 0 || run.over) return;
+  player.hearts--; player.iframes = IFRAMES; player.combo = 0;
+  player.vy = -320; player.vx = -220 * player.face;
+  game.shake = 11; S.hurt();
+  burst(player.x + player.w/2, player.y + player.h/2, "#ff9fc4", 14);
+  if (player.hearts <= 0) endRun("squashed");
+}
+
+function puffRing(x, y) {
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    world.parts.push({ x, y, vx: Math.cos(a) * 130, vy: Math.sin(a) * 55 - 20,
+                       life: 0, max: 0.32, color: "#ffffff", size: 3.4 });
+  }
+}
+
+function floatText(x, y, txt, color) {
+  world.texts.push({ x, y, txt, color, life: 0, max: 0.95 });
+}
+
+function burst(x, y, color, n, spd = 220) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = spd * (0.35 + Math.random() * 0.8);
+    world.parts.push({ x, y, vx:Math.cos(a)*s, vy:Math.sin(a)*s - 60,
+                       life:0, max:0.35 + Math.random()*0.4, color, size:2 + Math.random()*4 });
+  }
+}
+
+function respawnFromPit() {
+  // dropped into a gap: lose a heart, then get set back down on solid ground
+  let col = Math.floor(player.x / TILE);
+  for (let i = 0; i < 200; i++) {
+    const px = (col + i) * TILE + TILE/2;
+    if (isSolidPx(px, (ROWS - 1) * TILE + 4)) {
+      player.x = px - player.w/2;
+      player.y = (ROWS - 1) * TILE - player.h - 90;
+      player.vx = 0; player.vy = 0;
+      hurt();
+      return;
+    }
+  }
+  player.x += TILE * 3; player.y = 200; player.vx = player.vy = 0; hurt();
+}
+
+function updatePlay(dt) {
+  pollInput();
+  game.shake *= Math.pow(0.0016, dt);
+
+  if (!run.over) {
+    /* ---- horizontal movement ---- */
+    const accel = player.onGround ? RUN_ACCEL : AIR_ACCEL;
+    let dir = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    if (dir !== 0) {
+      player.vx += dir * accel * dt;
+      player.vx = Math.max(-MAX_RUN, Math.min(MAX_RUN, player.vx));
+      player.face = dir;
+    } else if (player.onGround) {
+      const f = FRICTION * dt;
+      player.vx = Math.abs(player.vx) <= f ? 0 : player.vx - Math.sign(player.vx) * f;
+    }
+
+    /* ---- jump: coyote time + input buffering ---- */
+    if (input.jumpPressed) { player.buffer = JUMP_BUFFER; input.jumpPressed = false; }
+    player.buffer -= dt; player.coyote -= dt;
+    if (player.buffer > 0 && player.coyote > 0) {
+      player.vy = -JUMP_V; player.buffer = 0; player.coyote = 0;
+      player.onGround = false; player.squash = -0.35; S.jump();
+    } else if (player.buffer > 0 && player.airJumps > 0 && !player.onGround) {
+      // the double bounce -- a second, slightly smaller jump in mid-air
+      player.airJumps--; player.buffer = 0;
+      player.vy = -JUMP_V * DOUBLE_V; player.squash = -0.45;
+      S.double();
+      puffRing(player.x + player.w/2, player.y + player.h);
+    }
+    if (player.vy < 0 && !input.jumpHeld) player.vy *= Math.pow(JUMP_CUT, dt * 60 / 8);
+
+    player.prevY = player.y;
+    const hit = moveBody(player, dt);
+    if (hit.ground) {
+      if (!player.onGround) { player.squash = 0.45; S.land(); }
+      player.onGround = true; player.coyote = COYOTE; player.combo = 0; player.airJumps = 1;
+    } else {
+      if (player.onGround) player.coyote = COYOTE;   // just walked off a ledge
+      player.onGround = false;
+    }
+    if (player.x < run.wallX - 200) player.x = run.wallX - 200;
+    if (player.y > H + 120) respawnFromPit();
+
+    player.iframes = Math.max(0, player.iframes - dt);
+    player.anim += dt * (player.onGround ? Math.abs(player.vx) / 42 : 4);
+    player.squash += (0 - player.squash) * Math.min(1, dt * 12);
+
+    run.maxX = Math.max(run.maxX, player.x);
+    run.dist = Math.max(0, Math.floor((run.maxX - 100) / TILE));
+  } else {
+    run.endT += dt;
+    player.vy = Math.min(player.vy + GRAVITY * dt, MAX_FALL);
+    player.y += player.vy * dt;
+    player.x += player.vx * dt;
+  }
+
+  /* ---- keep the course built ahead of the player ---- */
+  while ((player.x + 3 * CHUNK_W) > (world.built + 1) * CHUNK_W) buildChunk(world.built + 1);
+
+  /* ---- the squish wall ---- */
+  if (!run.over) {
+    let ws = Math.min(WALL_MAX, WALL_BASE + run.dist * WALL_GAIN);
+    run.wallX += ws * dt;
+    const lead = player.x - run.wallX;
+    if (lead > WALL_LEASH) run.wallX += (lead - WALL_LEASH) * 1.7 * dt;  // no camping far ahead
+    if (run.wallX + 30 > player.x + 8) { endRun("wall"); }
+  }
+
+  /* ---- enemies ---- */
+  for (const e of world.enemies) {
+    if (e.dead) { e.dead += dt; continue; }
+    if (e.x < run.wallX - 500 || e.x > player.x + W) continue;
+    e.t += dt;
+    if (e.kind === "7") {
+      e.hopT -= dt;
+      if (e.onGround && e.hopT <= 0) { e.vy = -600; e.hopT = 1.1 + Math.random() * 0.6; e.onGround = false; }
+    }
+    const before = e.vx;
+    const r = moveBody(e, dt);
+    e.onGround = r.ground;
+    if (r.wall) e.vx = -before;
+    // turn around at ledges so they stay on their platform
+    if (r.ground) {
+      const ahead = e.x + (e.vx > 0 ? e.w + 4 : -4);
+      if (!isSolidPx(ahead, e.y + e.h + 6)) e.vx = -e.vx;
+    }
+    if (e.vx === 0) e.vx = (Math.random() < 0.5 ? -1 : 1) * 55;
+
+    if (run.over) continue;
+    // stomp vs bump
+    if (overlap(player, e)) {
+      const fell = player.vy > 60 && (player.prevY + player.h) <= e.y + 14;
+      if (fell) {
+        e.dead = 0.001; e.vx = 0;
+        player.combo++;
+        const pay = 5 * player.combo;
+        player.vy = -STOMP_BOUNCE - Math.min(120, player.combo * 22);
+        player.squash = -0.4; player.airJumps = 1;   // squashing a 6-7 refreshes it
+        run.stomps++; run.money += pay; game.shake = 6;
+        sfx(240 + player.combo * 60, 0.13, "sawtooth", 0.055, -140);
+        floatText(e.x + e.w/2, e.y, player.combo > 1 ? "+" + pay + "  x" + player.combo + "!" : "+" + pay,
+                  player.combo > 1 ? "#ff7fb0" : "#fff");
+        burst(e.x + e.w/2, e.y + e.h/2, e.kind === "6" ? "#ffc7de" : "#c9d8ff", 8 + player.combo * 4);
+      } else hurt();
+    }
+  }
+  for (let i = world.enemies.length - 1; i >= 0; i--) {
+    const e = world.enemies[i];
+    if ((e.dead && e.dead > 0.45) || e.x < run.wallX - 700) world.enemies.splice(i, 1);
+  }
+
+  /* ---- coins, hazards, rings ---- */
+  for (const c of world.coins) {
+    if (c.got) continue;
+    c.t += dt;
+    if (run.over) continue;
+    const dx = (player.x + player.w/2) - c.x, dy = (player.y + player.h/2) - c.y;
+    if (dx*dx + dy*dy < 30*30) {
+      c.got = true; run.coins++; run.money++; S.coin();
+      burst(c.x, c.y, "#ffe07a", 7, 150);
+    }
+  }
+  for (const hz of world.hazards) {
+    hz.t += dt;
+    if (run.over) continue;
+    if (player.x + player.w - 5 > hz.x - 15 && player.x + 5 < hz.x + 15 &&
+        player.y + player.h > hz.y - 14 && player.y < hz.y + 17) hurt();
+  }
+  for (const rg of world.rings) {
+    rg.a += dt * 2.2;
+    rg.y = rg.base + Math.sin(rg.a * 0.8) * 34;
+    if (run.over) continue;
+    const dx = (player.x + player.w/2) - rg.x, dy = (player.y + player.h/2) - rg.y;
+    if (dx*dx + dy*dy < 30*30) hurt();
+  }
+
+  /* ---- particles ---- */
+  for (let i = world.parts.length - 1; i >= 0; i--) {
+    const p = world.parts[i];
+    p.life += dt;
+    if (p.life >= p.max) { world.parts.splice(i, 1); continue; }
+    p.vy += 900 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.98;
+  }
+
+  for (let i = world.texts.length - 1; i >= 0; i--) {
+    const tx = world.texts[i];
+    tx.life += dt; tx.y -= 46 * dt;
+    if (tx.life >= tx.max) world.texts.splice(i, 1);
+  }
+
+  /* ---- camera + companion trail ---- */
+  const target = Math.max(player.x - 340, run.wallX - 40);
+  run.camX += (target - run.camX) * Math.min(1, dt * 6);
+  run.camX = Math.max(run.camX, run.wallX - 60);
+  trail.unshift({ x: player.x, y: player.y });
+  if (trail.length > 26) trail.pop();
+
+  syncHud();
+  if (run.over && run.endT > 1.1) showGameOver();
+}
+
+const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
+function syncHud() {
+  document.getElementById("hearts").textContent =
+    "💗".repeat(Math.max(0, player.hearts)) + "🤍".repeat(Math.max(0, 3 - player.hearts));
+  document.getElementById("hudMoney").textContent = run.money;
+  document.getElementById("hudDist").textContent = run.dist;
+}
+
+/* ==========================================================================
+   DRAWING  -- everything is drawn in code, there are no image files
+   ========================================================================== */
+const cvs = document.getElementById("game");
+const ctx = cvs.getContext("2d");
+function fitCanvas() {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cvs.width = W * dpr; cvs.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+}
+addEventListener("resize", fitCanvas); fitCanvas();
+
+if (!ctx.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+    r = Math.min(r, w/2, h/2);
+    this.beginPath();
+    this.moveTo(x + r, y); this.arcTo(x + w, y, x + w, y + h, r);
+    this.arcTo(x + w, y + h, x, y + h, r); this.arcTo(x, y + h, x, y, r);
+    this.arcTo(x, y, x + w, y, r); this.closePath();
+    return this;
+  };
+}
+const rr = (x, y, w, h, r) => { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); };
+function eyes(cx, cy, s, look = 0, blink = false, ink = "#4a3f55") {
+  ctx.fillStyle = ink;
+  const ex = s * 0.34, ey = s * 0.05;
+  for (const sx of [-1, 1]) {
+    if (blink) { ctx.fillRect(cx + sx*ex - s*0.13, cy + ey, s*0.26, s*0.07); continue; }
+    ctx.beginPath(); ctx.ellipse(cx + sx*ex + look*s*0.06, cy + ey, s*0.115, s*0.15, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(cx + sx*ex + look*s*0.06 + s*0.04, cy + ey - s*0.05, s*0.045, 0, 7); ctx.fill();
+    ctx.fillStyle = ink;
+  }
+}
+function blush(cx, cy, s, color = "rgba(255,150,180,.5)") {
+  ctx.fillStyle = color;
+  for (const sx of [-1, 1]) {
+    ctx.beginPath(); ctx.ellipse(cx + sx*s*0.56, cy + s*0.26, s*0.15, s*0.1, 0, 0, 7); ctx.fill();
+  }
+}
+
+/* ------------------------------ background ------------------------------ */
+const CLOUDS = Array.from({ length: 9 }, (_, i) => ({
+  x: i * 340 + Math.random() * 160, y: 40 + Math.random() * 170, s: 0.6 + Math.random() * 0.9
+}));
+function drawSky(camX, t) {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0,   "#bcdcff"); g.addColorStop(0.42, "#ddd9fb");
+  g.addColorStop(0.72,"#f7dcec"); g.addColorStop(1,    "#fbe7d6");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  // sun
+  ctx.fillStyle = "rgba(255,246,214,.85)";
+  ctx.beginPath(); ctx.arc(W - 140, 96, 52, 0, 7); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,.5)";
+  ctx.beginPath(); ctx.arc(W - 140, 96, 74, 0, 7); ctx.fill();
+
+  // clouds
+  for (const c of CLOUDS) {
+    const x = mod(c.x - camX * 0.12 + Math.sin(t * 0.1 + c.s) * 8, W + 400) - 200;
+    puff(x, c.y, 46 * c.s, "rgba(255,255,255,.82)");
+  }
+  // far hills
+  hills(camX * 0.18, 400, 84, "#c3d8f2", 0.0042);
+  hills(camX * 0.32, 448, 62, "#c8e4d3", 0.0061);
+  // giant blurry dumplings drifting behind the course
+  for (let i = 0; i < 10; i++) {
+    const bx = mod(i * 420 - camX * 0.42, W + 900) - 450;
+    ctx.globalAlpha = 0.3; ctx.fillStyle = "#f6c9dd";
+    ctx.beginPath(); ctx.ellipse(bx, 424, 62, 46, 0, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  // hedge line, mostly tucked behind the ground so it only peeks over the top
+  for (let i = 0; i < 20; i++) {
+    const bx = mod(i * 210 - camX * 0.62, W + 430) - 215;
+    ctx.globalAlpha = 0.85;
+    puff(bx, 524, 58, "#9fd9bb");
+    ctx.globalAlpha = 1;
+  }
+}
+const mod = (v, m) => ((v % m) + m) % m;
+function puff(x, y, s, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.ellipse(x, y, s, s * 0.62, 0, 0, 7);
+  ctx.ellipse(x - s * 0.7, y + s * 0.16, s * 0.6, s * 0.44, 0, 0, 7);
+  ctx.ellipse(x + s * 0.72, y + s * 0.18, s * 0.55, s * 0.4, 0, 0, 7);
+  ctx.fill();
+}
+function hills(off, baseY, amp, color, freq) {
+  ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(0, H);
+  for (let x = 0; x <= W; x += 12) {
+    const wx = x + off;
+    ctx.lineTo(x, baseY - Math.sin(wx * freq) * amp - Math.sin(wx * freq * 2.7) * amp * 0.32);
+  }
+  ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+}
+
+/* -------------------------------- terrain ------------------------------- */
+function drawTiles(camX) {
+  const c0 = Math.floor(camX / TILE) - 1, c1 = Math.ceil((camX + W) / TILE) + 1;
+  for (let col = c0; col <= c1; col++) {
+    for (let row = 0; row < ROWS; row++) {
+      const px = col * TILE, py = row * TILE;
+      const ch = tileAtPx(px + 2, py + 2);
+      if (ch !== "#" && ch !== "C") continue;
+      const x = px - camX, open = !isSolidPx(px + 2, py - 4);
+      if (ch === "C") {
+        ctx.fillStyle = "#efb93f"; rr(x, py, TILE, TILE, 8); ctx.fill();
+        ctx.fillStyle = "#ffd76b"; rr(x + 2, py + 2, TILE - 4, TILE * 0.42, 7); ctx.fill();
+        ctx.fillStyle = "rgba(214,161,54,.55)";
+        for (const [hx, hy, hr] of [[13, 15, 5], [30, 26, 6.5], [21, 36, 3.5]]) {
+          ctx.beginPath(); ctx.arc(x + hx, py + hy, hr, 0, 7); ctx.fill();
+        }
+      } else {
+        ctx.fillStyle = "#63c79c"; rr(x, py, TILE, TILE + 1, open ? 9 : 2); ctx.fill();
+        ctx.fillStyle = "#49ac83"; ctx.fillRect(x, py + TILE * 0.55, TILE, TILE * 0.45);
+        if (open) {
+          ctx.fillStyle = "#a9ecca"; rr(x, py, TILE, 12, 8); ctx.fill();
+          ctx.fillStyle = "rgba(255,255,255,.55)";
+          ctx.beginPath(); ctx.ellipse(x + 12, py + 5, 7, 2.6, 0, 0, 7); ctx.fill();
+        }
+      }
+    }
+  }
+}
+
+/* ------------------------------ collectibles ---------------------------- */
+function drawCoins(camX, t) {
+  for (const c of world.coins) {
+    if (c.got || c.x < camX - 60 || c.x > camX + W + 60) continue;
+    const x = c.x - camX, y = c.y + Math.sin(t * 2.4 + c.t) * 4;
+    const sw = Math.abs(Math.cos(t * 2.6 + c.t));
+    ctx.save(); ctx.translate(x, y); ctx.scale(0.35 + sw * 0.65, 1);
+    ctx.fillStyle = "#f2c23e"; ctx.beginPath(); ctx.arc(0, 0, 13, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ffe07a"; ctx.beginPath(); ctx.arc(0, 0, 10, 0, 7); ctx.fill();
+    ctx.fillStyle = "#f2c23e"; ctx.font = "bold 13px ui-rounded,system-ui,sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("D", 0, 1);
+    ctx.restore();
+  }
+}
+function drawHazard(hz, camX, t) {
+  const x = hz.x - camX, y = hz.y, b = Math.sin(t * 3 + hz.t) * 2;
+  ctx.fillStyle = "rgba(60,45,75,.14)";
+  ctx.beginPath(); ctx.ellipse(x, y + 18, 15, 4, 0, 0, 7); ctx.fill();
+  ctx.save(); ctx.translate(x, y + b);
+  switch (hz.kind) {
+    case "D": // angry dumpling
+      ctx.fillStyle = "#ffe9d2"; rr(-17, -14, 34, 28, 13); ctx.fill();
+      ctx.fillStyle = "#ffd3ad";
+      for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.arc(i * 7, -13, 5, Math.PI, 0); ctx.fill(); }
+      ctx.strokeStyle = "#c9927a"; ctx.lineWidth = 2.4; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(-11, -5); ctx.lineTo(-4, -2); ctx.moveTo(11, -5); ctx.lineTo(4, -2); ctx.stroke();
+      eyes(0, 2, 20, 0, false, "#7a5c4e"); break;
+    case "S": // strawberry
+      ctx.fillStyle = "#ff8fa8"; ctx.beginPath();
+      ctx.moveTo(0, 16); ctx.quadraticCurveTo(-18, 2, -13, -8);
+      ctx.quadraticCurveTo(-6, -16, 0, -10); ctx.quadraticCurveTo(6, -16, 13, -8);
+      ctx.quadraticCurveTo(18, 2, 0, 16); ctx.fill();
+      ctx.fillStyle = "#fff0f3";
+      for (const [sx, sy] of [[-6,0],[5,-2],[0,7],[-2,-6],[8,6]]) { ctx.beginPath(); ctx.ellipse(sx, sy, 1.6, 2.4, 0, 0, 7); ctx.fill(); }
+      ctx.fillStyle = "#7fd6a0"; rr(-9, -16, 18, 7, 3.5); ctx.fill(); break;
+    case "P": // paw
+      ctx.fillStyle = "#f7a8c6"; ctx.beginPath(); ctx.ellipse(0, 5, 15, 12, 0, 0, 7); ctx.fill();
+      for (const [px, py, pr] of [[-11,-8,5],[-4,-12,5.2],[4,-12,5.2],[11,-8,5]]) {
+        ctx.beginPath(); ctx.arc(px, py, pr, 0, 7); ctx.fill();
+      }
+      ctx.fillStyle = "rgba(255,255,255,.5)"; ctx.beginPath(); ctx.ellipse(-4, 2, 5, 4, 0, 0, 7); ctx.fill(); break;
+    case "N": // banana
+      ctx.fillStyle = "#f7d95c"; ctx.beginPath();
+      ctx.moveTo(-16, -6); ctx.quadraticCurveTo(0, 20, 16, -6);
+      ctx.quadraticCurveTo(2, 9, -16, -6); ctx.fill();
+      ctx.fillStyle = "#c9a92e"; ctx.beginPath(); ctx.arc(-16, -6, 3, 0, 7); ctx.fill(); break;
+    case "B": // butter
+      ctx.fillStyle = "#f0d268"; rr(-17, -12, 34, 24, 5); ctx.fill();
+      ctx.fillStyle = "#fff0a8"; rr(-17, -12, 34, 9, 4); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.6)"; rr(-12, -8, 12, 4, 2); ctx.fill(); break;
+  }
+  ctx.restore();
+}
+function drawRing(rg, camX) {
+  const x = rg.x - camX;
+  ctx.save(); ctx.translate(x, rg.y); ctx.rotate(rg.a);
+  const cols = ["#ffb3c6", "#ffd98a", "#a8e6c8", "#a8c8f0", "#d0b0f0", "#ffc0e0"];
+  ctx.lineWidth = 8; ctx.lineCap = "butt";
+  for (let i = 0; i < cols.length; i++) {
+    ctx.strokeStyle = cols[i]; ctx.beginPath();
+    ctx.arc(0, 0, 17, i * 1.047, (i + 1) * 1.047 + 0.03); ctx.stroke();
+  }
+  ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.arc(0, 0, 21.5, -0.9, 0.2); ctx.stroke();
+  ctx.restore();
+}
+
+/* -------------------------------- enemies -------------------------------- */
+function drawEnemy(e, camX, t) {
+  const x = e.x + e.w/2 - camX, y = e.y + e.h/2;
+  const squash = e.dead ? Math.min(1, e.dead * 7) : 0;
+  const w = e.w/2 * (1 + squash * 0.55), h = e.h/2 * (1 - squash * 0.78);
+  const wob = e.dead ? 0 : Math.sin(e.t * 7) * 0.06;
+  ctx.save(); ctx.translate(x, y + squash * e.h * 0.4);
+  const body = e.kind === "6" ? "#ff9fc4" : "#9fc0f0";
+  const dark = e.kind === "6" ? "#e87ba7" : "#7ea3d8";
+  ctx.fillStyle = dark; ctx.beginPath(); ctx.ellipse(0, 4, w * (1 + wob), h * (1 - wob), 0, 0, 7); ctx.fill();
+  ctx.fillStyle = body; ctx.strokeStyle = "rgba(88,66,104,.42)"; ctx.lineWidth = 2.2;
+  ctx.beginPath(); ctx.ellipse(0, 1, w * (1 + wob), h * (1 - wob), 0, 0, 7); ctx.fill(); ctx.stroke();
+  if (!e.dead) {
+    // little feet
+    ctx.fillStyle = dark;
+    const sw = Math.sin(e.t * 9) * 4;
+    ctx.beginPath(); ctx.ellipse(-7, h - 2, 5, 3.4, 0, 0, 7); ctx.ellipse(7, h - 2 + sw * 0.2, 5, 3.4, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.9)";
+    ctx.font = "900 20px ui-rounded,system-ui,sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(e.kind, 0, 7);
+    eyes(0, -5, 21, e.vx > 0 ? 1 : -1, (Math.sin(e.t * 1.7) > 0.94));
+    blush(0, -5, 12, "rgba(255,255,255,.45)");
+  } else {
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.6; ctx.lineCap = "round";
+    for (const sx of [-7, 7]) {
+      ctx.beginPath(); ctx.moveTo(sx - 4, -3); ctx.lineTo(sx + 4, 3);
+      ctx.moveTo(sx + 4, -3); ctx.lineTo(sx - 4, 3); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/* --------------------------- the hero dumpling --------------------------- */
+function drawDumplingHero(cx, footY, scale, t, opts) {
+  const o = opts || {};
+  const run = o.run || 0, air = o.air || 0, sq = o.squash || 0, face = o.face || 1;
+  const w = 46 * scale * (1 - sq * 0.55), h = 46 * scale * (1 + sq * 0.55);
+  const cy = footY - h * 0.5 - 6 * scale;
+  const swing = Math.sin(run) * 0.9;
+
+  ctx.fillStyle = "rgba(60,45,75,.16)";
+  ctx.beginPath(); ctx.ellipse(cx, footY + 4, 20 * scale, 5 * scale, 0, 0, 7); ctx.fill();
+
+  ctx.save(); ctx.translate(cx, cy); ctx.scale(face, 1);
+
+  // legs
+  ctx.strokeStyle = "#e8a889"; ctx.lineWidth = 6.5 * scale; ctx.lineCap = "round";
+  const legY = h * 0.42, legLen = 13 * scale;
+  for (const s of [-1, 1]) {
+    const kick = air ? (s > 0 ? -0.5 : 0.35) : swing * s;
+    ctx.beginPath();
+    ctx.moveTo(s * 8 * scale, legY);
+    ctx.lineTo(s * 8 * scale + kick * 9 * scale, legY + legLen);
+    ctx.stroke();
+    ctx.fillStyle = "#f8c3a4";
+    ctx.beginPath();
+    ctx.ellipse(s * 8 * scale + kick * 11 * scale, legY + legLen + 2 * scale, 6 * scale, 4 * scale, 0, 0, 7);
+    ctx.fill();
+  }
+  // arms
+  ctx.strokeStyle = "#e8a889"; ctx.lineWidth = 5.6 * scale;
+  for (const s of [-1, 1]) {
+    const a = air ? -1.1 : -swing * s * 0.8;
+    ctx.beginPath();
+    ctx.moveTo(s * w * 0.42, -h * 0.02);
+    ctx.lineTo(s * w * 0.42 + s * 9 * scale, -h * 0.02 + a * 8 * scale + 7 * scale);
+    ctx.stroke();
+  }
+  // body: pastel rainbow dumpling
+  const g = ctx.createLinearGradient(-w/2, -h/2, w/2, h/2);
+  g.addColorStop(0.00, "#ffadd2"); g.addColorStop(0.24, "#ffd390");
+  g.addColorStop(0.48, "#a9edc4"); g.addColorStop(0.74, "#9ecdff");
+  g.addColorStop(1.00, "#c3a9ff");
+  ctx.fillStyle = g;
+  ctx.strokeStyle = "rgba(88,66,104,.5)"; ctx.lineWidth = 2.6 * scale;
+  ctx.beginPath(); ctx.ellipse(0, 0, w * 0.5, h * 0.48, 0, 0, 7); ctx.fill(); ctx.stroke();
+  // pleats along the top
+  ctx.fillStyle = "rgba(255,255,255,.62)";
+  for (let i = -2; i <= 2; i++) {
+    ctx.beginPath();
+    ctx.ellipse(i * w * 0.19, -h * 0.4, w * 0.1, h * 0.1, 0, Math.PI, 0);
+    ctx.fill();
+  }
+  ctx.strokeStyle = "rgba(255,255,255,.75)"; ctx.lineWidth = 1.8 * scale;
+  ctx.beginPath(); ctx.ellipse(0, 0, w * 0.5 - 3, h * 0.48 - 3, 0, 0, 7); ctx.stroke();
+  // shine
+  ctx.fillStyle = "rgba(255,255,255,.55)";
+  ctx.beginPath(); ctx.ellipse(-w * 0.18, -h * 0.2, w * 0.13, h * 0.09, -0.5, 0, 7); ctx.fill();
+  // face
+  eyes(0, -h * 0.04, 30 * scale, 0.6, Math.sin(t * 1.3) > 0.965);
+  blush(0, -h * 0.04, 17 * scale);
+  ctx.strokeStyle = "#4a3f55"; ctx.lineWidth = 2 * scale; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.arc(2 * scale, h * 0.1, 5 * scale, 0.15, Math.PI - 0.45); ctx.stroke();
+  ctx.restore();
+}
+
+function drawPlayer(camX, t) {
+  if (player.iframes > 0 && Math.floor(player.iframes * 22) % 2 === 0) return;
+  drawDumplingHero(player.x + player.w/2 - camX, player.y + player.h, 1, t, {
+    run: player.anim, air: player.onGround ? 0 : 1, squash: player.squash, face: player.face
+  });
+}
+
+/* ----------------------------- the squish wall --------------------------- */
+function drawWall(camX, t) {
+  const edge = run.wallX - camX;
+  if (edge < -60) return;
+  const g = ctx.createLinearGradient(-40, 0, edge, 0);
+  g.addColorStop(0, "#c2508f"); g.addColorStop(0.6, "#ef82b6"); g.addColorStop(1, "#ffb3d4");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.moveTo(-60, -20); ctx.lineTo(-60, H + 20);
+  for (let y = H + 20; y >= -20; y -= 14) {
+    ctx.lineTo(edge + Math.sin(y * 0.035 + t * 3.4) * 9 + Math.sin(y * 0.09 - t * 2) * 4, y);
+  }
+  ctx.closePath(); ctx.fill();
+  // goopy highlights + bubbles
+  ctx.fillStyle = "rgba(255,255,255,.35)";
+  for (let i = 0; i < 12; i++) {
+    const yy = mod(i * 61 - t * 46, H + 60) - 30;
+    const xx = edge - 26 - Math.sin(yy * 0.05 + t) * 16;
+    ctx.beginPath(); ctx.arc(xx, yy, 4 + (i % 3) * 2.5, 0, 7); ctx.fill();
+  }
+  // eyes so it reads as a big hungry blob
+  ctx.save(); ctx.translate(edge - 46, H * 0.42 + Math.sin(t * 1.6) * 10);
+  eyes(0, 0, 46, 1, Math.sin(t * 1.1) > 0.93, "#5c2448");
+  ctx.restore();
+  ctx.strokeStyle = "rgba(255,255,255,.6)"; ctx.lineWidth = 3;
+  ctx.beginPath();
+  for (let y = -20; y <= H + 20; y += 14) {
+    const xx = edge + Math.sin(y * 0.035 + t * 3.4) * 9 + Math.sin(y * 0.09 - t * 2) * 4;
+    y === -20 ? ctx.moveTo(xx, y) : ctx.lineTo(xx, y);
+  }
+  ctx.stroke();
+}
+
+/* the closer the wall gets, the harder the left edge of the screen throbs */
+function drawWallWarning(camX, t) {
+  const gap = player.x - run.wallX;
+  if (gap > 300 || run.over) return;
+  const heat = Math.min(1, (300 - gap) / 260) * (0.55 + 0.45 * Math.sin(t * 11));
+  const g = ctx.createLinearGradient(0, 0, W * 0.55, 0);
+  g.addColorStop(0, "rgba(255,80,150," + (0.5 * heat).toFixed(3) + ")");
+  g.addColorStop(1, "rgba(255,80,150,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W * 0.55, H);
+}
+
+function drawParticles(camX) {
+  for (const p of world.parts) {
+    const a = 1 - p.life / p.max;
+    ctx.globalAlpha = Math.max(0, a);
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x - camX, p.y, p.size * a + 0.8, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* --------------------------- collectible squishies ----------------------- */
+function drawSquishy(c, cx, cy, s, def, t) {
+  c.save(); c.translate(cx, cy);
+  const bob = Math.sin(t * 2 + s) * s * 0.03;
+  c.translate(0, bob);
+  if (def.shine) {
+    const gl = c.createRadialGradient(0, 0, s * 0.4, 0, 0, s * 1.5);
+    gl.addColorStop(0, "rgba(255,255,220,.55)"); gl.addColorStop(1, "rgba(255,255,220,0)");
+    c.fillStyle = gl; c.beginPath(); c.arc(0, 0, s * 1.5, 0, 7); c.fill();
+  }
+  let fill = def.c1;
+  if (def.rainbow) {
+    const g = c.createLinearGradient(-s, -s, s, s);
+    g.addColorStop(0, "#ffd4e6"); g.addColorStop(0.3, "#ffeec2"); g.addColorStop(0.6, "#d4f5e2");
+    g.addColorStop(1, "#d6d8ff"); fill = g;
+  }
+  c.fillStyle = fill; c.strokeStyle = def.c2; c.lineWidth = s * 0.07;
+
+  const P = () => { c.fill(); c.stroke(); };
+  switch (def.shape) {
+    case "dumpling":
+      c.beginPath(); c.ellipse(0, s * 0.08, s * 0.82, s * 0.62, 0, 0, 7); P();
+      c.fillStyle = def.c2;
+      for (let i = -2; i <= 2; i++) { c.beginPath(); c.arc(i * s * 0.3, -s * 0.44, s * 0.15, Math.PI, 0); c.fill(); }
+      break;
+    case "round":
+      c.beginPath(); c.arc(0, 0, s * 0.76, 0, 7); P(); break;
+    case "block":
+      c.beginPath(); c.roundRect(-s * 0.68, -s * 0.55, s * 1.36, s * 1.1, s * 0.18); P();
+      c.fillStyle = "rgba(255,255,255,.5)";
+      c.beginPath(); c.roundRect(-s * 0.5, -s * 0.4, s * 0.7, s * 0.2, s * 0.1); c.fill(); break;
+    case "berry":
+      c.beginPath(); c.moveTo(0, s * 0.85); c.quadraticCurveTo(-s, s * 0.05, -s * 0.7, -s * 0.42);
+      c.quadraticCurveTo(-s * 0.3, -s * 0.85, 0, -s * 0.5);
+      c.quadraticCurveTo(s * 0.3, -s * 0.85, s * 0.7, -s * 0.42);
+      c.quadraticCurveTo(s, s * 0.05, 0, s * 0.85); P();
+      c.fillStyle = "#7fd6a0"; c.beginPath(); c.roundRect(-s * 0.45, -s * 0.85, s * 0.9, s * 0.32, s * 0.14); c.fill(); break;
+    case "banana":
+      c.beginPath(); c.moveTo(-s * 0.85, -s * 0.35); c.quadraticCurveTo(0, s * 1.05, s * 0.85, -s * 0.35);
+      c.quadraticCurveTo(s * 0.1, s * 0.45, -s * 0.85, -s * 0.35); P(); break;
+    case "cheese":
+      c.beginPath(); c.moveTo(-s * 0.85, s * 0.5); c.lineTo(s * 0.85, s * 0.5);
+      c.lineTo(s * 0.5, -s * 0.6); c.closePath(); P();
+      c.fillStyle = def.c2;
+      for (const [hx, hy, hr] of [[-0.2, 0.22, 0.14], [0.35, 0.3, 0.1], [0.1, -0.1, 0.09]]) {
+        c.beginPath(); c.arc(hx * s, hy * s, hr * s, 0, 7); c.fill();
+      } break;
+    case "paw":
+      c.beginPath(); c.ellipse(0, s * 0.28, s * 0.7, s * 0.55, 0, 0, 7); P();
+      for (const [px, py] of [[-0.5, -0.42], [-0.17, -0.62], [0.17, -0.62], [0.5, -0.42]]) {
+        c.beginPath(); c.arc(px * s, py * s, s * 0.22, 0, 7); c.fill(); c.stroke();
+      } break;
+    case "cloud":
+      c.beginPath(); c.ellipse(0, 0, s * 0.7, s * 0.5, 0, 0, 7);
+      c.ellipse(-s * 0.55, s * 0.14, s * 0.45, s * 0.34, 0, 0, 7);
+      c.ellipse(s * 0.55, s * 0.14, s * 0.42, s * 0.32, 0, 0, 7); P(); break;
+    case "ring":
+      c.lineWidth = s * 0.3; c.strokeStyle = def.c1;
+      c.beginPath(); c.arc(0, 0, s * 0.6, 0, 7); c.stroke();
+      c.strokeStyle = def.c2; c.lineWidth = s * 0.09;
+      c.beginPath(); c.arc(0, 0, s * 0.76, 0, 7); c.stroke();
+      c.beginPath(); c.arc(0, 0, s * 0.44, 0, 7); c.stroke(); break;
+    case "star":
+      c.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? s * 0.38 : s * 0.88;
+        i ? c.lineTo(Math.cos(a) * r, Math.sin(a) * r) : c.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      c.closePath(); P(); break;
+  }
+  if (def.stars) {
+    c.fillStyle = "rgba(255,255,255,.9)";
+    for (const [sx, sy, sr] of [[-0.3, -0.1, 0.06], [0.25, 0.15, 0.05], [0.05, -0.3, 0.04], [0.4, -0.25, 0.035]]) {
+      c.beginPath(); c.arc(sx * s, sy * s, sr * s, 0, 7); c.fill();
+    }
+  }
+  // face
+  const ex = s * 0.26, ey = s * (def.shape === "paw" ? 0.2 : 0.02);
+  c.fillStyle = "#4a3f55";
+  for (const sx of [-1, 1]) { c.beginPath(); c.ellipse(sx * ex, ey, s * 0.085, s * 0.11, 0, 0, 7); c.fill(); }
+  c.fillStyle = "rgba(255,150,180,.45)";
+  for (const sx of [-1, 1]) { c.beginPath(); c.ellipse(sx * s * 0.45, ey + s * 0.18, s * 0.11, s * 0.07, 0, 0, 7); c.fill(); }
+  c.strokeStyle = "#4a3f55"; c.lineWidth = s * 0.05; c.lineCap = "round";
+  c.beginPath(); c.arc(0, ey + s * 0.06, s * 0.11, 0.25, Math.PI - 0.25); c.stroke();
+  c.restore();
+}
+
+function drawEgg(c, cx, cy, s, tier, shake, cracks) {
+  const cols = [["#fff6ea", "#ffe0c2"], ["#e6f4ff", "#c2dcf5"], ["#f0e6ff", "#d4c2f5"],
+                ["#ffe9f2", "#f5c2d8"], ["#fff6c2", "#f5d76e"]][Math.min(tier, 5) - 1];
+  c.save(); c.translate(cx + (shake ? Math.sin(shake * 47) * 5 : 0), cy);
+  c.rotate(shake ? Math.sin(shake * 33) * 0.06 : 0);
+  const g = c.createLinearGradient(-s, -s, s * 0.6, s);
+  g.addColorStop(0, "#ffffff"); g.addColorStop(0.45, cols[0]); g.addColorStop(1, cols[1]);
+  c.fillStyle = g;
+  c.beginPath(); c.ellipse(0, 0, s * 0.72, s, 0, 0, 7); c.fill();
+  c.fillStyle = cols[1]; c.globalAlpha = 0.75;
+  for (const [dx, dy, dr] of [[-0.3, 0.25, 0.14], [0.28, -0.1, 0.11], [0.05, 0.55, 0.1], [-0.15, -0.42, 0.09]]) {
+    c.beginPath(); c.arc(dx * s, dy * s, dr * s, 0, 7); c.fill();
+  }
+  c.globalAlpha = 1;
+  c.fillStyle = "rgba(255,255,255,.6)";
+  c.beginPath(); c.ellipse(-s * 0.28, -s * 0.42, s * 0.14, s * 0.22, -0.4, 0, 7); c.fill();
+  if (cracks > 0) {
+    c.strokeStyle = "rgba(120,95,130,.75)"; c.lineWidth = s * 0.045; c.lineCap = "round";
+    const path = [[-0.6, -0.1], [-0.3, 0.05], [-0.35, -0.2], [0, -0.05], [0.05, -0.3], [0.3, -0.1], [0.28, 0.12], [0.6, 0.02]];
+    const n = Math.ceil(path.length * Math.min(1, cracks));
+    c.beginPath();
+    for (let i = 0; i < n; i++) { const p = path[i]; i ? c.lineTo(p[0] * s, p[1] * s) : c.moveTo(p[0] * s, p[1] * s); }
+    c.stroke();
+  }
+  c.restore();
+}
+
+/* ==========================================================================
+   SCENES
+   ========================================================================== */
+function renderPlay(t) {
+  const camX = run.camX;
+  ctx.save();
+  if (game.shake > 0.3) ctx.translate((Math.random() - 0.5) * game.shake, (Math.random() - 0.5) * game.shake);
+  drawSky(camX, t);
+  drawTiles(camX);
+  for (const hz of world.hazards) if (hz.x > camX - 60 && hz.x < camX + W + 60) drawHazard(hz, camX, t);
+  drawCoins(camX, t);
+  for (const rg of world.rings) if (rg.x > camX - 60 && rg.x < camX + W + 60) drawRing(rg, camX);
+  for (const e of world.enemies) if (e.x > camX - 80 && e.x < camX + W + 80) drawEnemy(e, camX, t);
+  drawCompanion(camX, t);
+  drawPlayer(camX, t);
+  drawParticles(camX);
+  ctx.font = "900 20px ui-rounded,system-ui,sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const tx of world.texts) {
+    ctx.globalAlpha = Math.max(0, 1 - tx.life / tx.max);
+    ctx.lineWidth = 4; ctx.strokeStyle = "rgba(90,74,102,.55)";
+    ctx.strokeText(tx.txt, tx.x - camX, tx.y);
+    ctx.fillStyle = tx.color; ctx.fillText(tx.txt, tx.x - camX, tx.y);
+  }
+  ctx.globalAlpha = 1;
+  drawWall(camX, t);
+  drawWallWarning(camX, t);
+  ctx.restore();
+
+  if (run.over) {
+    ctx.fillStyle = "rgba(90,74,102," + Math.min(0.45, run.endT * 0.5) + ")";
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+function drawCompanion(camX, t) {
+  if (!save.equipped || trail.length < 20) return;
+  const def = byId(save.equipped); if (!def) return;
+  const p = trail[Math.min(trail.length - 1, 19)];
+  drawSquishy(ctx, p.x + player.w/2 - camX, p.y + 6, 15, def, t);
+}
+
+function renderHub(t) {
+  drawSky(t * 26, t);
+  // a soft meadow floor
+  ctx.fillStyle = "#63c79c"; ctx.fillRect(0, H - 45, W, 45);
+  ctx.fillStyle = "#a9ecca"; ctx.fillRect(0, H - 45, W, 11);
+  // egg on its pedestal, off to the right
+  ctx.fillStyle = "rgba(90,74,102,.12)";
+  ctx.beginPath(); ctx.ellipse(W - 150, H - 44, 62, 12, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = "#e8dcff"; rr(W - 200, H - 96, 100, 52, 16); ctx.fill();
+  drawEgg(ctx, W - 150, H - 140, 52, save.eggTier, t * 0.06, 0);
+  // hero idling on the left
+  drawDumplingHero(126, H - 45, 1.15, t, { run: t * 1.2, air: 0, squash: Math.sin(t * 2) * 0.05, face: 1 });
+  // owned squishies float around like little balloons
+  const own = SQUISHIES.filter(s => owned(s.id));
+  own.slice(0, 10).forEach((s, i) => {
+    const x = 60 + i * 92, y = 96 + Math.sin(t * 1.1 + i * 1.3) * 16;
+    ctx.globalAlpha = 0.9; drawSquishy(ctx, x, y, 22, s, t + i); ctx.globalAlpha = 1;
+  });
+}
+
+function renderHatch(t, dt) {
+  const hx = game.hatch;
+  drawSky(t * 20, t);
+  ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.fillRect(0, 0, W, H);
+  hx.t += dt;
+  const phase = hx.t;
+  if (phase < 2.5) {
+    const shake = phase > 0.6 ? phase : 0;
+    drawEgg(ctx, W/2, H/2, 96, hx.tier, shake, Math.max(0, (phase - 0.9) / 1.5));
+    if (phase > 0.9 && Math.random() < 0.05) S.crack();
+    ctx.fillStyle = "#5a4a66"; ctx.font = "900 26px ui-rounded,system-ui,sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(EGGS[Math.min(hx.tier, 5) - 1].name + " is hatching...", W/2, H - 70);
+  } else if (!hx.revealed) {
+    hx.revealed = true;
+    S.hatch();
+    for (let i = 0; i < 46; i++) {
+      const a = Math.random() * 6.28, sp = 120 + Math.random() * 320;
+      world.parts.push({ x: W/2, y: H/2, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp - 150,
+                         life: 0, max: 0.7 + Math.random()*0.6,
+                         color: ["#ffd4e6","#ffe8c2","#d8f5df","#cfe4ff","#e2d4ff"][(Math.random()*5)|0],
+                         size: 3 + Math.random()*4 });
+    }
+    grant(hx.sq);
+    showMenu(menuReveal(hx.sq, hx.free));
+  } else {
+    drawSquishy(ctx, W/2, H/2 - 30, 78, hx.sq, t);
+  }
+  for (let i = world.parts.length - 1; i >= 0; i--) {
+    const p = world.parts[i];
+    p.life += dt;
+    if (p.life >= p.max) { world.parts.splice(i, 1); continue; }
+    p.vy += 620 * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+  }
+  drawParticles(0);
+}
+
+/* ==========================================================================
+   MENUS
+   ========================================================================== */
+const menuEl = document.getElementById("menu");
+const sheetEl = document.getElementById("sheet");
+function showMenu(html) {
+  if (html == null) { menuEl.classList.add("off"); return; }
+  sheetEl.innerHTML = html;
+  menuEl.classList.remove("off");
+  sheetEl.scrollTop = 0;
+  // paint any little squishy previews the sheet asked for
+  sheetEl.querySelectorAll("canvas[data-sq]").forEach(cv => {
+    const def = byId(cv.dataset.sq); if (!def) return;
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    const size = +cv.dataset.size || 54;
+    cv.width = size * dpr; cv.height = size * dpr;
+    cv.style.width = size + "px"; cv.style.height = size + "px";
+    const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!c.roundRect) c.roundRect = CanvasRenderingContext2D.prototype.roundRect;
+    drawSquishy(c, size/2, size/2, size * 0.36, def, 0);
+  });
+}
+const money = () => Math.floor(save.money);
+
+function menuHub() {
+  const egg = eggDef();
+  const up = egg.upgrade;
+  return `
+    <h1>Squishy Escape</h1>
+    <p class="sub">by Annie Smith, Ash Smith &amp; Computer Smith</p>
+    <div class="stats">
+      <div class="stat money">🪙<b>${money()}</b>Dumpleningness</div>
+      <div class="stat egg">🥚<b>${egg.name}</b>your egg</div>
+      <div class="stat book">🧸<b>${distinctOwned()}/${SQUISHIES.length}</b>squishies</div>
+      <div class="stat">🏁<b>${save.bestDist} m</b>best run</div>
+    </div>
+    <div class="btns">
+      <button class="primary" data-act="start">▶ Start Run</button>
+      <button data-act="hatch" ${money() < HATCH_COST ? "disabled" : ""}>🥚 Hatch <span class="cost">${HATCH_COST}</span></button>
+      <button data-act="upgrade" ${(!up || money() < up) ? "disabled" : ""}>
+        ${up ? `⬆️ Better Egg <span class="cost">${up}</span>` : "⬆️ Egg maxed!"}</button>
+      <button data-act="trader">🤝 Squishy Trader</button>
+      <button data-act="book">📖 Collection</button>
+      <button data-act="help">❔ How to Play</button>
+    </div>`;
+}
+
+function menuHelp() {
+  return `
+    <h2>How to Play</h2>
+    <p class="sub">Run right. Don't let the squish wall get you.</p>
+    <div class="tradeRow"><span>⬅️ ➡️ or A / D</span><span>run and backtrack</span></div>
+    <div class="tradeRow"><span>Space / ⬆️ / W</span><span>jump — hold for higher</span></div>
+    <div class="tradeRow"><span>Space again in mid-air</span><span>double bounce!</span></div>
+    <div class="tradeRow"><span>Land on a 6 or a 7</span><span>squash it, +5 🪙<br>and your double bounce comes back</span></div>
+    <div class="tradeRow"><span>Dumplings, strawberries, paws,<br>bananas, butter, fidget rings</span><span>ouch — costs a 💗</span></div>
+    <div class="tradeRow"><span>The pink wall</span><span>ends the run instantly</span></div>
+    <div class="tradeRow"><span>P or Esc</span><span>pause</span></div>
+    <div class="tradeRow"><span>M</span><span>mute / unmute</span></div>
+    <div class="tradeRow"><span>The music</span><span>speeds up and turns minor-key<br>the further out you get</span></div>
+    <div class="tradeRow"><span>Chain your stomps!</span><span>land on 6-7s without touching<br>the ground: 5, 10, 15, 20 🪙...</span></div>
+    <p class="sub">You get 3 hearts. Falling in a pit costs one too. Coins and distance
+    both pay out in Dumpleningness — spend it on a better egg for better odds.</p>
+    <div class="btns"><button data-act="hub">Back</button></div>`;
+}
+
+function menuBook() {
+  const cells = SQUISHIES.map(s => {
+    const n = save.counts[s.id] || 0;
+    const eq = save.equipped === s.id;
+    return `<div class="cell ${n ? "have" : "locked"} ${eq ? "equipped" : ""}" data-act="${n ? "equip" : ""}" data-id="${s.id}">
+      ${n ? `<canvas data-sq="${s.id}" data-size="54"></canvas>` : `<div style="width:54px;height:54px;display:grid;place-items:center;font-size:28px;font-weight:900;opacity:.22">?</div>`}
+      <div class="nm">${n ? s.name : "???"}</div>
+      <div class="rr" style="color:${RARITY_INK[s.r]}">${RARITY[s.r]}</div>
+      ${n > 1 ? `<div class="ct">x${n}</div>` : ""}
+    </div>`;
+  }).join("");
+  return `<h2>Collection</h2>
+    <p class="sub">${distinctOwned()} of ${SQUISHIES.length} found — tap one you own to carry it with you</p>
+    <div class="grid">${cells}</div>
+    <div class="btns"><button data-act="hub">Back</button></div>`;
+}
+
+function menuTrader() {
+  let rows = "";
+  for (let t = 0; t < 3; t++) {
+    const d = dupesOfRarity(t);
+    rows += `<div class="tradeRow">
+      <span>3 spare <b style="color:${RARITY_INK[t]}">${RARITY[t]}</b> → 1 random <b style="color:${RARITY_INK[t+1]}">${RARITY[t+1]}</b><br>
+      <span style="opacity:.6;font-weight:700">you have ${d} spare</span></span>
+      <button class="small" data-act="trade" data-t="${t}" ${d < 3 ? "disabled" : ""}>Trade</button></div>`;
+  }
+  const d3 = dupesOfRarity(3);
+  rows += `<div class="tradeRow">
+    <span>3 spare <b style="color:${RARITY_INK[3]}">Super Rare</b> → 500 🪙<br>
+    <span style="opacity:.6;font-weight:700">you have ${d3} spare</span></span>
+    <button class="small" data-act="trade" data-t="3" ${d3 < 3 ? "disabled" : ""}>Trade</button></div>`;
+  const odds = eggDef().odds;
+  return `<h2>🤝 Squishy Trader</h2>
+    <p class="sub">"Spare squishies? I'll trade you up, friend."</p>
+    ${rows}
+    <p class="sub" style="margin-top:1em">Your ${eggDef().name} hatches:</p>
+    <div class="odds">${RARITY.map((r, i) => `<span style="color:${RARITY_INK[i]}">${r} ${odds[i]}%</span>`).join("")}</div>
+    <div class="btns"><button data-act="hub">Back</button></div>`;
+}
+
+function menuReveal(sq, free) {
+  return `<h2 style="color:${RARITY_INK[sq.r]}">${RARITY[sq.r]}!</h2>
+    <div style="display:grid;place-items:center;margin:.2em 0 .4em">
+      <canvas data-sq="${sq.id}" data-size="120"></canvas></div>
+    <h2 style="margin:0">${sq.name}</h2>
+    <p class="sub">${(save.counts[sq.id] || 0) > 1
+      ? `You already had one — spare copies can be traded up.`
+      : `New! Added to your collection.`}</p>
+    <div class="btns">
+      ${free ? `<button class="primary" data-act="start">▶ Start your first run</button>` : ""}
+      <button data-act="hub">${free ? "Look around first" : "Nice!"}</button>
+      ${!free && money() >= HATCH_COST ? `<button data-act="hatch">🥚 Hatch another <span class="cost">${HATCH_COST}</span></button>` : ""}
+    </div>`;
+}
+
+function menuPause() {
+  return `<h2>Paused</h2>
+    <div class="stats">
+      <div class="stat">📏<b>${run.dist} m</b>so far</div>
+      <div class="stat money">🪙<b>${run.money}</b>this run</div>
+    </div>
+    <div class="btns">
+      <button class="primary" data-act="resume">▶ Keep running</button>
+      <button data-act="giveup">🏳️ Give up</button>
+    </div>`;
+}
+
+function togglePause() {
+  if (game.state === "play") {
+    if (run.over) return;
+    game.state = "paused"; MUSIC.setMode("off");
+    document.getElementById("touch").classList.remove("on");
+    showMenu(menuPause());
+  } else if (game.state === "paused") {
+    game.state = "play"; MUSIC.setMode("run");
+    document.getElementById("touch").classList.add("on");
+    showMenu(null);
+  }
+}
+
+function menuGameOver() {
+  const cause = run.cause === "wall"
+    ? "The squish wall got you!" : "You ran out of hearts!";
+  return `<h2>${cause}</h2>
+    <p class="sub">Run #${save.runs}</p>
+    <div class="stats">
+      <div class="stat">📏<b>${run.dist} m</b>distance</div>
+      <div class="stat">🪙<b>${run.coins}</b>coins</div>
+      <div class="stat">👟<b>${run.stomps}</b>6-7s squashed</div>
+      <div class="stat money">💰<b>+${run.money}</b>Dumpleningness</div>
+    </div>
+    <p class="sub">(includes a +${run.bonus} distance bonus) — you now have <b>${money()}</b> 🪙${
+      run.dist >= save.bestDist && run.dist > 0 ? `<br>🎉 New best distance!` : ""}</p>
+    <div class="btns">
+      <button class="primary" data-act="start">↻ Run Again</button>
+      <button data-act="hub">🏠 Hub</button>
+      ${money() >= HATCH_COST ? `<button data-act="hatch">🥚 Hatch <span class="cost">${HATCH_COST}</span></button>` : ""}
+    </div>`;
+}
+
+function showGameOver() {
+  if (game.state !== "play" && game.state !== "paused") return;
+  game.state = "over";
+  setPlayUI(false);
+  showMenu(menuGameOver());
+}
+
+function goHub() {
+  game.state = "hub";
+  MUSIC.setMode("hub");
+  setPlayUI(false);
+  showMenu(menuHub());
+}
+
+function beginHatch(free) {
+  audioOn();
+  if (!free) {
+    if (save.money < HATCH_COST) return;
+    save.money -= HATCH_COST; persist();
+  }
+  game.state = "hatch";
+  MUSIC.setMode("hub");
+  world.parts.length = 0;
+  game.hatch = { t: 0, sq: free ? pickOfRarity(0) : rollSquishy(), tier: free ? 1 : save.eggTier, revealed: false, free };
+  showMenu(null);
+}
+
+/* menu clicks */
+sheetEl.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]");
+  if (!el || el.disabled) return;
+  const act = el.dataset.act;
+  if (!act) return;
+  audioOn(); S.click();
+  switch (act) {
+    case "start":   startRun(); break;
+    case "resume":  togglePause(); break;
+    case "giveup":  game.state = "play"; endRun("hearts"); showGameOver(); break;
+    case "hub":     goHub(); break;
+    case "help":    showMenu(menuHelp()); break;
+    case "book":    showMenu(menuBook()); break;
+    case "trader":  showMenu(menuTrader()); break;
+    case "hatch":   beginHatch(false); break;
+    case "upgrade": {
+      const cost = eggDef().upgrade;
+      if (cost && save.money >= cost) {
+        save.money -= cost; save.eggTier++; persist();
+        S.hatch();
+      }
+      showMenu(menuHub()); break;
+    }
+    case "equip": {
+      const id = el.dataset.id;
+      if (owned(id)) { save.equipped = save.equipped === id ? null : id; persist(); }
+      showMenu(menuBook()); break;
+    }
+    case "trade": {
+      const t = +el.dataset.t;
+      if (dupesOfRarity(t) < 3) break;
+      let need = 3;
+      for (const s of SQUISHIES) {
+        if (s.r !== t || need === 0) continue;
+        const spare = Math.max(0, (save.counts[s.id] || 0) - 1);
+        const take = Math.min(spare, need);
+        save.counts[s.id] -= take; need -= take;
+      }
+      if (t === 3) { save.money += 500; persist(); showMenu(menuTrader()); S.coin(); }
+      else {
+        persist();
+        game.state = "hatch";
+        world.parts.length = 0;
+        game.hatch = { t: 1.6, sq: pickOfRarity(t + 1), tier: save.eggTier, revealed: false, free: false };
+        showMenu(null);
+      }
+      break;
+    }
+  }
+});
+
+/* mute */
+const muteBtn = document.getElementById("btnMute");
+function toggleMute() {
+  save.muted = !save.muted; persist();
+  muteBtn.textContent = save.muted ? "🔇" : "🔊";
+  MUSIC.gain();
+}
+muteBtn.textContent = save.muted ? "🔇" : "🔊";
+muteBtn.addEventListener("click", () => { audioOn(); toggleMute(); });
+const pauseBtn = document.getElementById("btnPause");
+pauseBtn.addEventListener("click", () => { audioOn(); S.click(); togglePause(); });
+
+/* ==========================================================================
+   MAIN LOOP
+   ========================================================================== */
+let last = performance.now(), acc = 0;
+const STEP = 1 / 120;
+function frame(now) {
+  let dt = Math.min(0.25, (now - last) / 1000); last = now;
+  game.t += dt;
+  if (game.state === "play" || game.state === "over") {
+    acc += dt;
+    let guard = 0;
+    while (acc >= STEP && guard++ < 40) { updatePlay(STEP); acc -= STEP; }
+    renderPlay(game.t);
+  } else if (game.state === "paused") {
+    acc = 0;
+    renderPlay(game.t);
+  } else if (game.state === "hatch") {
+    renderHatch(game.t, dt);
+  } else {
+    renderHub(game.t);
+  }
+  requestAnimationFrame(frame);
+}
+
+/* poke at the game from the browser console: __SE.save, __SE.player, etc. */
+window.__SE = { game, save, player, run, world, startRun, goHub, beginHatch, persist, MUSIC, SECTIONS,
+                SQUISHIES, EGGS, TEMPLATES, grant, input, reset(){ localStorage.removeItem(SAVE_KEY); location.reload(); } };
+
+/* first boot: the common egg from the spec, free, hatching on its own */
+resetWorld();
+if (!save.seenIntro) {
+  save.seenIntro = true; persist();
+  showMenu(`<h1>Squishy Escape</h1>
+    <p class="sub">by Annie Smith, Ash Smith &amp; Computer Smith</p>
+    <div style="font-size:clamp(12px,2.1vmin,18px);font-weight:700;line-height:1.55;margin:.4em 0 1em">
+      There's an egg here. A <b>Common Egg</b>.<br>
+      Inside is your very first squishy.<br><br>
+      Hatch it, run the obstacle course, squash the 6-7s,<br>
+      outrun the squish wall, and bring home the
+      <b>Dumpleningness</b>.<br><br>
+      Then buy a better egg. Then a better one.
+    </div>
+    <div class="btns"><button class="primary" data-act="firsthatch">🥚 Crack it open</button></div>`);
+  sheetEl.addEventListener("click", e => {
+    const el = e.target.closest('[data-act="firsthatch"]');
+    if (el) { audioOn(); beginHatch(true); }
+  });
+} else {
+  goHub();
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
