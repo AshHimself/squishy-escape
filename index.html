@@ -41,7 +41,8 @@
   /* ---------- in-run HUD ---------- */
   #hud{display:none;padding:2.2% 2.6%;font-weight:800}
   #hud.on{display:block}
-  .hudrow{display:flex;align-items:center;gap:1.2em;justify-content:space-between}
+  .hudrow{display:flex;align-items:center;gap:1.2em;justify-content:space-between;
+    padding-right:clamp(56px,9vmin,104px)}
   .pill{
     background:rgba(255,253,249,.86); border-radius:999px;
     padding:.35em .85em; font-size:clamp(10px,1.9vmin,20px);
@@ -184,6 +185,14 @@ const WALL_GAIN  = 0.055; // ...plus this much per metre travelled
 const WALL_MAX   = 265;
 const WALL_LEASH = 950;   // if you get further ahead than this, it speeds up
 
+/* the magical carrot and the rainbow ride it launches you into */
+const RAINBOW_TIME  = 9.5;   // seconds in the sky
+const RAINBOW_SPEED = 430;   // how fast you fly along the rainbow
+const RAINBOW_LIFT  = 2050;  // hold jump to climb
+const RAINBOW_FALL  = 1150;
+const RAINBOW_VMAX  = 460;
+const CARROT_COIN   = 3;     // sky coins are worth more than ground ones
+
 /* ------------------------------- save file ------------------------------ */
 const SAVE_KEY = "squishyEscape.save.v1";
 const freshSave = () => ({
@@ -224,6 +233,8 @@ const S = {
   stomp: () => sfx(260, 0.13, "sawtooth", 0.055, -170),
   hurt:  () => sfx(300, 0.28, "sawtooth", 0.07, -220),
   click: () => sfx(600, 0.05, "sine", 0.04),
+  carrot:() => [0, 70, 140, 210, 300, 400].forEach((d, i) =>
+    setTimeout(() => sfx([523, 659, 784, 1046, 1318, 1568][i], 0.3, "triangle", 0.075), d)),
   crack: () => sfx(220, 0.08, "square", 0.06, 120),
   hatch: () => [0, 90, 180, 300].forEach((d, i) => setTimeout(() => sfx([523, 659, 784, 1046][i], 0.22, "triangle", 0.06), d))
 };
@@ -257,6 +268,10 @@ const SECTIONS = {
     lead: [81, 79, 76, 79, 84, 81, 79, 76, 74, 76, 79, 76, 72, 74, 76, 79],
     roots: [48, 53, 55, 55], bassEvery: 2,
     kick: "x..x..x.x..x..x.", snare: "....x.......x...", hat: "x.x.x.x.x.x.x.x." },
+  rainbow: { bpm: 152, wave: "triangle", arp: true, swing: 0,
+    lead: [84, 88, 91, 88, 93, 91, 88, 84, 86, 88, 91, 93, 91, 88, 86, 84],
+    roots: [48, 53, 55, 53], bassEvery: 2,
+    kick: "x...x...x...x...", snare: "................", hat: "x.x.x.x.x.x.x.x." },
   3: { bpm: 138, wave: "square", arp: true, swing: 0.03,
     lead: [84, 81, 79, 81, 84, 86, 84, 81, 79, 76, 74, 76, 79, 81, 84, 86],
     roots: [48, 53, 55, 48], bassEvery: 2,
@@ -295,6 +310,7 @@ const MUSIC = {
   /* which section should be playing right now */
   pickSection() {
     if (this.mode === "hub") { this.sec = SECTIONS.hub; this.level = -1; return; }
+    if (this.mode === "rainbow") { this.sec = SECTIONS.rainbow; this.level = -2; return; }
     // these thresholds line up with where the course unlocks harder chunks
     const lvl = run.dist < 80 ? 0 : run.dist < 176 ? 1 : run.dist < 320 ? 2 : 3;
     if (lvl !== this.level) { this.level = lvl; this.sec = SECTIONS[lvl]; }
@@ -601,13 +617,14 @@ const TEMPLATES = [
 const world = {
   tiles: new Map(),   // chunk index -> array of 12 strings (solids only)
   built: -1,          // highest chunk index generated so far
-  coins: [], hazards: [], enemies: [], rings: [], parts: [], texts: []
+  coins: [], hazards: [], enemies: [], rings: [], parts: [], texts: [], carrots: [], lastCarrot: -99
 };
 
 function resetWorld() {
   world.tiles.clear(); world.built = -1;
   world.coins.length = world.hazards.length = 0;
   world.enemies.length = world.rings.length = world.parts.length = world.texts.length = 0;
+  world.carrots.length = 0; world.lastCarrot = -99;
   for (let i = 0; i <= 3; i++) buildChunk(i);
 }
 
@@ -643,6 +660,20 @@ function buildChunk(index) {
     }
     solid.push(line);
   }
+  /* Every so often, tuck a magical carrot somewhere jumpable. Never two close
+     together -- it should feel like a lucky find, not a pickup line. */
+  if (index >= 3 && index - world.lastCarrot >= 7 && Math.random() < 0.42) {
+    const spots = [];
+    for (let c = 2; c < COLS - 2; c++) {
+      if (solid[ROWS - 1][c] === "#" && solid[8][c] === "." && solid[7][c] === "." && solid[9][c] === ".") spots.push(c);
+    }
+    if (spots.length) {
+      const c = spots[(Math.random() * spots.length) | 0];
+      world.carrots.push({ x: index * CHUNK_W + c * TILE + TILE/2, y: 8 * TILE + TILE/2, got: false, t: Math.random() * 6 });
+      world.lastCarrot = index;
+    }
+  }
+
   world.tiles.set(index, solid);
   world.built = Math.max(world.built, index);
 }
@@ -715,7 +746,7 @@ function moveBody(b, dt) {
 const game   = { state:"hub", t:0, shake:0, hatch:null };
 const player = { x:100, y:455, w:30, h:40, vx:0, vy:0, prevY:455, onGround:false,
                  face:1, coyote:0, buffer:0, iframes:0, hearts:3, anim:0, squash:0, combo:0, airJumps:1 };
-const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, over:false, endT:0 };
+const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, over:false, endT:0, rainbow:null };
 const trail  = [];   // breadcrumb positions so the companion squishy can follow
 
 function startRun() {
@@ -726,6 +757,7 @@ function startRun() {
   player.iframes = 0; player.hearts = 3; player.anim = 0; player.squash = 0; player.combo = 0; player.airJumps = 1;
   run.money = run.coins = run.stomps = run.dist = 0;
   run.maxX = 100; run.wallX = -420; run.camX = 0; run.over = false; run.endT = 0;
+  run.rainbow = null;
   trail.length = 0;
   game.state = "play"; game.shake = 0;
   showMenu(null);
@@ -800,7 +832,102 @@ function respawnFromPit() {
   player.x += TILE * 3; player.y = 200; player.vx = player.vy = 0; hurt();
 }
 
+/* the shape of the rainbow in world space -- the road and the coins on it both
+   come from this one function, so the coins always sit on the rainbow */
+const rainbowY = wx => 292 + Math.sin(wx * 0.0016) * 132 + Math.sin(wx * 0.0007) * 58;
+
+function startRainbow(cx, cy) {
+  run.rainbow = { t: 0, ry: player.y, vy: -540, coins: [], got: 0, launch: 0.55 };
+  for (let i = 0; i < 54; i++) {
+    const x = player.x + 520 + i * 74;
+    run.rainbow.coins.push({ x, y: rainbowY(x), got: false });
+  }
+  game.shake = 14;
+  burst(cx, cy, "#ffb347", 26, 340);
+  for (let i = 0; i < 26; i++) {
+    burst(cx + (Math.random() - 0.5) * 60, cy + (Math.random() - 0.5) * 60,
+          ["#ff9fc4","#ffe97a","#a9edc4","#9ecdff","#c3a9ff"][(Math.random()*5)|0], 2, 260);
+  }
+  S.carrot();
+  MUSIC.setMode("rainbow");
+}
+
+function endRainbow() {
+  // set back down on solid ground, wherever we've drifted to
+  let col = Math.floor(player.x / TILE);
+  for (let i = 0; i < 300; i++) {
+    const px = (col + i) * TILE + TILE/2;
+    if (isSolidPx(px, (ROWS - 1) * TILE + 4)) { player.x = px - player.w/2; break; }
+  }
+  player.y = (ROWS - 1) * TILE - player.h - 210;
+  player.vx = 0; player.vy = 0; player.onGround = false;
+  player.airJumps = 1; player.iframes = 0.9;
+  // the wall waited for you -- park it at the leash so it doesn't snap forward
+  run.wallX = player.x - WALL_LEASH + 60;
+  run.rainbow = null;
+  MUSIC.setMode("run");
+}
+
+function updateRainbow(dt) {
+  const R = run.rainbow;
+  pollInput();
+  R.t += dt;
+  game.shake *= Math.pow(0.0016, dt);
+
+  if (R.launch > 0) {
+    // the initial whoosh upward before you take the controls
+    R.launch -= dt;
+    R.vy += 900 * dt;
+    R.ry += R.vy * dt;
+    if (R.launch <= 0) R.ry = Math.max(90, Math.min(H - 90, R.ry));
+  } else {
+    R.vy += (input.jumpHeld ? -RAINBOW_LIFT : RAINBOW_FALL) * dt;
+    R.vy = Math.max(-RAINBOW_VMAX, Math.min(RAINBOW_VMAX, R.vy));
+    R.ry += R.vy * dt;
+    if (R.ry < 70)     { R.ry = 70;     R.vy = Math.max(R.vy, 0); }
+    if (R.ry > H - 76) { R.ry = H - 76; R.vy = Math.min(R.vy, 0); }
+  }
+
+  player.x += RAINBOW_SPEED * dt;
+  player.anim += dt * 7;
+  run.maxX = Math.max(run.maxX, player.x);
+  run.dist = Math.max(0, Math.floor((run.maxX - 100) / TILE));
+  while ((player.x + 3 * CHUNK_W) > (world.built + 1) * CHUNK_W) buildChunk(world.built + 1);
+
+  for (const c of R.coins) {
+    if (c.got) continue;
+    if (Math.abs(c.x - player.x) < 34 && Math.abs(c.y - R.ry) < 36) {
+      c.got = true; R.got++; run.coins++; run.money += CARROT_COIN;
+      S.coin();
+      burst(c.x, c.y, "#ffe07a", 9, 190);
+      floatText(c.x, c.y - 14, "+" + CARROT_COIN, "#fff6c2");
+    }
+  }
+
+  // sparkle trail
+  if (Math.random() < 0.75) {
+    world.parts.push({ x: player.x - 14, y: R.ry + (Math.random() - 0.5) * 22,
+      vx: -180 - Math.random() * 90, vy: (Math.random() - 0.5) * 70, life: 0, max: 0.5,
+      color: ["#ff9fc4","#ffe97a","#a9edc4","#9ecdff","#c3a9ff"][(Math.random()*5)|0], size: 3.2 });
+  }
+  for (let i = world.parts.length - 1; i >= 0; i--) {
+    const p = world.parts[i];
+    p.life += dt;
+    if (p.life >= p.max) { world.parts.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+  }
+  for (let i = world.texts.length - 1; i >= 0; i--) {
+    const tx = world.texts[i]; tx.life += dt; tx.y -= 46 * dt;
+    if (tx.life >= tx.max) world.texts.splice(i, 1);
+  }
+
+  run.camX = player.x - 300;
+  syncHud();
+  if (R.t >= RAINBOW_TIME) endRainbow();
+}
+
 function updatePlay(dt) {
+  if (run.rainbow) { updateRainbow(dt); return; }
   pollInput();
   game.shake *= Math.pow(0.0016, dt);
 
@@ -928,6 +1055,13 @@ function updatePlay(dt) {
     if (run.over) continue;
     if (player.x + player.w - 5 > hz.x - 15 && player.x + 5 < hz.x + 15 &&
         player.y + player.h > hz.y - 14 && player.y < hz.y + 17) hurt();
+  }
+  for (const ct of world.carrots) {
+    if (ct.got) continue;
+    ct.t += dt;
+    if (run.over) continue;
+    const dx = (player.x + player.w/2) - ct.x, dy = (player.y + player.h/2) - ct.y;
+    if (dx*dx + dy*dy < 34*34) { ct.got = true; startRainbow(ct.x, ct.y); return; }
   }
   for (const rg of world.rings) {
     rg.a += dt * 2.2;
@@ -1152,6 +1286,51 @@ function drawHazard(hz, camX, t) {
   }
   ctx.restore();
 }
+function drawCarrot(ct, camX, t) {
+  if (ct.got) return;
+  const x = ct.x - camX, y = ct.y + Math.sin(t * 2 + ct.t) * 6;
+  const pulse = 0.72 + Math.sin(t * 4.5 + ct.t) * 0.28;
+
+  // the glow
+  const g = ctx.createRadialGradient(x, y, 4, x, y, 52 * pulse);
+  g.addColorStop(0,   "rgba(255,224,150,.95)");
+  g.addColorStop(0.35,"rgba(255,180,90,.45)");
+  g.addColorStop(1,   "rgba(255,170,90,0)");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, 52 * pulse, 0, 7); ctx.fill();
+
+  // orbiting sparkles
+  ctx.fillStyle = "rgba(255,255,255,.9)";
+  for (let i = 0; i < 5; i++) {
+    const a = t * 2.2 + i * 1.257, r = 27 + Math.sin(t * 3 + i) * 5;
+    ctx.beginPath(); ctx.arc(x + Math.cos(a) * r, y + Math.sin(a) * r * 0.75, 2.2, 0, 7); ctx.fill();
+  }
+
+  ctx.save(); ctx.translate(x, y); ctx.rotate(Math.sin(t * 1.6 + ct.t) * 0.16);
+  // leafy top
+  ctx.fillStyle = "#6fc95f";
+  for (const [lx, ly, rot] of [[-7, -20, -0.6], [0, -24, 0], [7, -20, 0.6]]) {
+    ctx.save(); ctx.translate(lx, ly); ctx.rotate(rot);
+    ctx.beginPath(); ctx.ellipse(0, 0, 4.5, 10, 0, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+  // body
+  const bg = ctx.createLinearGradient(-9, -14, 9, 18);
+  bg.addColorStop(0, "#ffc46b"); bg.addColorStop(0.5, "#ff9838"); bg.addColorStop(1, "#f07c20");
+  ctx.fillStyle = bg;
+  ctx.beginPath();
+  ctx.moveTo(-10, -13); ctx.quadraticCurveTo(0, -18, 10, -13);
+  ctx.quadraticCurveTo(6, 6, 0, 20); ctx.quadraticCurveTo(-6, 6, -10, -13);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.lineWidth = 1.6;
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath(); ctx.moveTo(-7 + i * 5, -8 + i * 5); ctx.lineTo(-2 + i * 5, -6 + i * 5); ctx.stroke();
+  }
+  ctx.fillStyle = "rgba(255,255,255,.6)";
+  ctx.beginPath(); ctx.ellipse(-4, -7, 2.2, 4.5, -0.3, 0, 7); ctx.fill();
+  ctx.restore();
+}
+
 function drawRing(rg, camX) {
   const x = rg.x - camX;
   ctx.save(); ctx.translate(x, rg.y); ctx.rotate(rg.a);
@@ -1440,7 +1619,119 @@ function drawEgg(c, cx, cy, s, tier, shake, cracks) {
 /* ==========================================================================
    SCENES
    ========================================================================== */
+const RAINBOW_COLS = ["#ff8fb8", "#ffb367", "#ffe873", "#8fe6a8", "#7fc9ff", "#a98bf5", "#ef94f5"];
+
+function renderRainbow(t) {
+  const R = run.rainbow, camX = run.camX;
+
+  // dreamy sky
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#5b3f8f"); g.addColorStop(0.35, "#a86ac4");
+  g.addColorStop(0.7, "#ef8fb8"); g.addColorStop(1, "#ffd28f");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  // stars
+  for (let i = 0; i < 46; i++) {
+    const sx = mod(i * 197 - camX * 0.08, W + 60) - 30;
+    const sy = (i * 73) % (H * 0.7);
+    const tw = 0.45 + Math.abs(Math.sin(t * 2 + i)) * 0.55;
+    ctx.fillStyle = "rgba(255,255,255," + tw.toFixed(2) + ")";
+    ctx.beginPath(); ctx.arc(sx, sy, 1.5 + (i % 3) * 0.7, 0, 7); ctx.fill();
+  }
+  // soft clouds drifting past
+  for (let i = 0; i < 8; i++) {
+    const cx2 = mod(i * 300 - camX * 0.3, W + 400) - 200;
+    ctx.globalAlpha = 0.22;
+    puff(cx2, 80 + (i * 91) % 340, 58, "#ffffff");
+    ctx.globalAlpha = 1;
+  }
+
+  // the rainbow road itself -- coins sit on this exact curve
+  ctx.lineCap = "round";
+  for (let i = 0; i < RAINBOW_COLS.length; i++) {
+    ctx.strokeStyle = RAINBOW_COLS[i];
+    ctx.globalAlpha = 0.85;
+    ctx.lineWidth = 15;
+    ctx.beginPath();
+    for (let x = -30; x <= W + 30; x += 14) {
+      const y = rainbowY(x + camX) + (i - 3) * 15;
+      x === -30 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 0.35; ctx.lineWidth = 4; ctx.strokeStyle = "#ffffff";
+  ctx.beginPath();
+  for (let x = -30; x <= W + 30; x += 14) {
+    const y = rainbowY(x + camX) - 50;
+    x === -30 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  ctx.save();
+  if (game.shake > 0.3) ctx.translate((Math.random() - 0.5) * game.shake, (Math.random() - 0.5) * game.shake);
+
+  drawParticles(camX);
+
+  // coins
+  for (const c of R.coins) {
+    if (c.got || c.x < camX - 40 || c.x > camX + W + 40) continue;
+    const x = c.x - camX, sw = Math.abs(Math.cos(t * 3 + c.x * 0.01));
+    ctx.save(); ctx.translate(x, c.y); ctx.scale(0.35 + sw * 0.65, 1);
+    ctx.fillStyle = "rgba(255,240,180,.45)";
+    ctx.beginPath(); ctx.arc(0, 0, 19, 0, 7); ctx.fill();
+    ctx.fillStyle = "#f2c23e"; ctx.beginPath(); ctx.arc(0, 0, 13, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ffe07a"; ctx.beginPath(); ctx.arc(0, 0, 10, 0, 7); ctx.fill();
+    ctx.fillStyle = "#f2c23e"; ctx.font = "bold 13px ui-rounded,system-ui,sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("D", 0, 1);
+    ctx.restore();
+  }
+
+  // the flying dumpling, tilted into the direction it's moving
+  const px = player.x - camX;
+  ctx.save();
+  ctx.translate(px, R.ry);
+  ctx.rotate(Math.max(-0.5, Math.min(0.5, R.vy / 900)));
+  ctx.translate(-px, -R.ry);
+  drawDumplingHero(px, R.ry + 26, 1.05, t, { run: player.anim, air: 1, squash: 0, face: 1 });
+  ctx.restore();
+
+  if (save.equipped) {
+    const def = byId(save.equipped);
+    if (def) drawSquishy(ctx, px - 52, R.ry + Math.sin(t * 5) * 9, 15, def, t);
+  }
+
+  ctx.font = "900 20px ui-rounded,system-ui,sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const tx of world.texts) {
+    ctx.globalAlpha = Math.max(0, 1 - tx.life / tx.max);
+    ctx.lineWidth = 4; ctx.strokeStyle = "rgba(70,45,90,.6)";
+    ctx.strokeText(tx.txt, tx.x - camX, tx.y);
+    ctx.fillStyle = tx.color; ctx.fillText(tx.txt, tx.x - camX, tx.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // how much rainbow is left
+  const frac = Math.max(0, 1 - R.t / RAINBOW_TIME);
+  const bw = W * 0.46, bx = (W - bw) / 2, by = H - 34;
+  ctx.fillStyle = "rgba(255,255,255,.28)"; rr(bx, by, bw, 13, 7); ctx.fill();
+  const bg2 = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+  RAINBOW_COLS.forEach((c, i) => bg2.addColorStop(i / (RAINBOW_COLS.length - 1), c));
+  ctx.fillStyle = bg2; rr(bx, by, Math.max(4, bw * frac), 13, 7); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,.95)";
+  ctx.font = "900 15px ui-rounded,system-ui,sans-serif"; ctx.textAlign = "center";
+  ctx.fillText("RAINBOW RIDE!  " + R.got + " coins", W/2, by - 14);
+
+  // a flash as you launch in
+  if (R.t < 0.45) {
+    ctx.fillStyle = "rgba(255,255,255," + (1 - R.t / 0.45).toFixed(3) + ")";
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
 function renderPlay(t) {
+  if (run.rainbow) { renderRainbow(t); return; }
   const camX = run.camX;
   ctx.save();
   if (game.shake > 0.3) ctx.translate((Math.random() - 0.5) * game.shake, (Math.random() - 0.5) * game.shake);
@@ -1449,6 +1740,7 @@ function renderPlay(t) {
   for (const hz of world.hazards) if (hz.x > camX - 60 && hz.x < camX + W + 60) drawHazard(hz, camX, t);
   drawCoins(camX, t);
   for (const rg of world.rings) if (rg.x > camX - 60 && rg.x < camX + W + 60) drawRing(rg, camX);
+  for (const ct of world.carrots) if (ct.x > camX - 90 && ct.x < camX + W + 90) drawCarrot(ct, camX, t);
   for (const e of world.enemies) if (e.x > camX - 80 && e.x < camX + W + 80) drawEnemy(e, camX, t);
   drawCompanion(camX, t);
   drawPlayer(camX, t);
@@ -1593,6 +1885,7 @@ function menuHelp() {
     <div class="tradeRow"><span>Land on a 6 or a 7</span><span>squash it, +5 🪙<br>and your double bounce comes back</span></div>
     <div class="tradeRow"><span>Dumplings, strawberries, paws,<br>bananas, butter, fidget rings</span><span>ouch — costs a 💗</span></div>
     <div class="tradeRow"><span>The pink wall</span><span>ends the run instantly</span></div>
+    <div class="tradeRow"><span>🥕 The glowing carrot</span><span>launches you onto a rainbow!<br>hold jump to fly up, let go to drop</span></div>
     <div class="tradeRow"><span>P or Esc</span><span>pause</span></div>
     <div class="tradeRow"><span>M</span><span>mute / unmute</span></div>
     <div class="tradeRow"><span>The music</span><span>speeds up and turns minor-key<br>the further out you get</span></div>
@@ -1819,6 +2112,7 @@ function frame(now) {
 
 /* poke at the game from the browser console: __SE.save, __SE.player, etc. */
 window.__SE = { game, save, player, run, world, startRun, goHub, beginHatch, persist, MUSIC, SECTIONS,
+                rainbowY, startRainbow, endRainbow,
                 SQUISHIES, EGGS, TEMPLATES, grant, input, reset(){ localStorage.removeItem(SAVE_KEY); location.reload(); } };
 
 /* first boot: the common egg from the spec, free, hatching on its own */

@@ -29,6 +29,7 @@ and on an iPad (on-screen buttons appear the moment you touch the screen).
 | Space / ↑ / W | jump (hold it down to jump higher) |
 | Space again in mid-air | **double bounce** — a second jump, slightly smaller |
 | Land on a 6 or a 7 | squash it for coins, and your double bounce comes back |
+| Hold jump on the rainbow | fly up — let go to drop |
 | P or Esc | pause |
 | M | mute |
 
@@ -40,12 +41,32 @@ ground and each one pays more: 5, then 10, then 15, then 20. This is the single
 best way to get rich — and because squashing a 6-7 gives your double bounce
 back, a good chain can keep you in the air a very long time.
 
+## 🥕 The magical carrot
+
+Every so often you'll find a **glowing carrot** floating above the course. Grab
+it and the dumpling gets launched into the sky onto a **mystical rainbow**.
+
+For the next nine and a half seconds you fly along the rainbow road: **hold
+jump to climb, let go to drop**. The coins sit right on the rainbow itself, so
+the trick is to *ride the curve* rather than fly over it — every coin up there
+is worth three times a normal one. A really tidy ride is worth around 150
+Dumpleningness, which is most of an egg upgrade in one go.
+
+The squish wall **stops dead while you're up there**, and you keep travelling
+the whole time, so a carrot is worth about 85m of free distance on top of the
+coins. When the rainbow runs out you float gently back down onto the course and
+the run carries on.
+
+Carrots turn up roughly once every eight course pieces, and never two close
+together — it should feel like a lucky find. `CARROT_COIN`, `RAINBOW_TIME` and
+`RAINBOW_SPEED` at the top of the file tune how generous it is.
+
 ## The music
 
 There are no music files either — every note is built out of oscillators while
 you play. The soundtrack has five sections and they're all cheerful major-key
-chiptune. It climbs a section each time the obstacle course starts handing out
-harder pieces: a little quicker (112 up to 138bpm), an arpeggio joins in, then
+chiptune, plus a sparkly high-register one just for the rainbow ride. It climbs
+a section each time the obstacle course starts handing out harder pieces: a little quicker (112 up to 138bpm), an arpeggio joins in, then
 a snare, and the melody moves up into a brighter register — but it stays happy
 the whole way. Press **M** to mute.
 
@@ -80,6 +101,9 @@ of course: **12 rows of exactly 16 characters**.
  P  paw                N  banana            B  butter
  R  fidget ring (floats and bobs)           6 / 7  the enemies
 ```
+
+Magical carrots aren't placed by hand — the game drops them into suitable
+pieces on its own, so you don't need a character for them.
 
 `tier` is how mean it is: `0` shows up right away, `3` only appears once you're
 about 20 pieces in.
