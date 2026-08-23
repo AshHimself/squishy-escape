@@ -30,9 +30,13 @@ and on an iPad (on-screen buttons appear the moment you touch the screen).
 | Space again in mid-air | **double bounce** — a second jump, slightly smaller |
 | Land on a 6 or a 7 | squash it for coins, and your double bounce comes back |
 | Hold jump on the rainbow | fly up — let go to drop |
-| ⭐ Star | invincible for 8.5 seconds |
+| ⬇️ or S on a slope | **slide** down it, arms in the air |
+| ⭐ Star | invincible for 11 seconds |
 | P or Esc | pause |
 | M | mute |
+
+The dumpling **builds up speed** rather than hitting top pace instantly, and if
+you hold a direction for about a second it gradually winds up into a sprint.
 
 You get **3 hearts**. Snacks and fidget rings cost a heart; so does falling in a
 pit. The **squish wall** ends the run instantly — that's the one that matters.
@@ -42,10 +46,28 @@ ground and each one pays more: 5, then 10, then 15, then 20. This is the single
 best way to get rich — and because squashing a 6-7 gives your double bounce
 back, a good chain can keep you in the air a very long time.
 
+## Slopes, planks and water
+
+**Slopes.** Some pieces have a hill. Walk up it normally — then hold **Down**
+on the way over the top and the dumpling throws both arms in the air and
+slides, picking up a *lot* more speed than it can run at. Let go, or reach flat
+ground, and you coast to a stop. It's the fastest way down a hill and it looks
+great.
+
+**Wooden planks.** Brown plank platforms wobble the moment *you* stand on them,
+then drop away about half a second later. They rebuild themselves a few seconds
+after that, so a missed jump isn't the end. The 6-7s can stand on them all day
+without breaking them — the planks only care about you.
+
+**Water and piranhas.** Ponds sit under the plank crossings. Falling in costs a
+heart and puts you back on dry land, and there are **piranhas** in there that
+leap out at whatever is passing overhead. The star makes you immune to the
+piranhas, but not to the dunking.
+
 ## ⭐ The star
 
 A **glowing star** turns up every ten course pieces or so. Grab it and you're
-**invincible for eight and a half seconds**, exactly like the star in Super
+**invincible for eleven seconds**, exactly like the star in Super
 Mario Bros: run straight through snacks, fidget rings and falling dumplings,
 and any 6-7 you touch just pops for coins — you don't even have to land on it.
 The dumpling glows with a cycling rainbow rim and the music switches to a fast
@@ -127,6 +149,16 @@ of course: **12 rows of exactly 16 characters**.
  W  rolling cheese wheel -- rolls left until it hits a wall or a ledge, then
     starts again from where it was placed.
  Z  bouncing strawberry -- bounces about two and a half tiles, forever.
+
+ =  wooden plank -- solid until YOU stand on it, then it wobbles, drops, and
+    rebuilds itself a few seconds later. Enemies don't set it off.
+ ~  water -- not solid. Falling in costs a heart. Keep the far left and right
+    of the bottom row solid so pieces still join up.
+ f  piranha -- put it on a water tile; it lurks and leaps.
+ >  ramp climbing to the right     <  ramp dropping to the right
+    Ramps are 45 degrees and one tile each, so a hill is a diagonal staircase
+    of them. Every ramp needs a solid tile directly underneath it, or the
+    dumpling falls straight through.
 ```
 
 Magical carrots aren't placed by hand — the game drops them into suitable
@@ -156,6 +188,10 @@ Three rules so the course stays possible:
 - The constants at the top — `JUMP_V`, `MAX_RUN`, `GRAVITY`, `WALL_BASE`,
   `WALL_MAX` — control how it feels. Turn `WALL_BASE` down to make it kinder.
   `DOUBLE_V` is how strong the mid-air bounce is compared to a normal jump.
+  `RUN_ACCEL` sets how quickly it gets up to speed, `SPRINT_RUN` how fast the
+  wind-up sprint goes, and `SLIDE_ACCEL` / `SLIDE_MAX` how fierce a slope
+  slide is. `WOOD_SHAKE` and `WOOD_BACK` are the plank's warning wobble and
+  how long it takes to rebuild.
 - `SECTIONS` — the music. Each entry is 16 sixteenth-notes: `lead` is a list of
   MIDI note numbers (`null` is a rest), `roots` is the bassline's four chords,
   and `kick` / `snare` / `hat` are patterns where `x` is a hit and `.` is a rest.
@@ -177,6 +213,10 @@ collection.
 ## Versions
 
 The version is shown on the main menu, under the title.
+
+- **v1.4.0** — slopes you can slide down with your arms in the air, wooden
+  planks that give way under you (but not under enemies), water with piranhas,
+  a longer star, and a gentler acceleration curve with a wind-up sprint.
 
 - **v1.3.0** — the star (invincibility), falling dumplings, rolling cheese
   wheels, bouncing strawberries, randomised snacks, a heart back for a good

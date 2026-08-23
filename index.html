@@ -138,6 +138,7 @@
     <div id="tcMove">
       <div class="tbtn" id="tcLeft">◀</div>
       <div class="tbtn" id="tcRight">▶</div>
+      <div class="tbtn" id="tcDown">▼</div>
     </div>
     <div class="tbtn" id="tcJump">⤴</div>
   </div>
@@ -162,7 +163,7 @@
 "use strict";
 
 /* ------------------------------ constants ------------------------------ */
-const VERSION = "1.3.0";           // major.minor.patch -- bump minor for features
+const VERSION = "1.4.0";           // major.minor.patch -- bump minor for features
 
 const W = 960, H = 540;            // virtual resolution
 const TILE = 45;                   // tile size
@@ -173,10 +174,13 @@ const CHUNK_W = COLS * TILE;       // 720px of course per chunk
 const GRAVITY      = 2200;
 const JUMP_V       = 780;
 const JUMP_CUT     = 0.45;   // release jump early -> shorter hop
-const RUN_ACCEL    = 2800;
-const AIR_ACCEL    = 1700;
-const FRICTION     = 3200;
+const RUN_ACCEL    = 1600;   // build up to speed rather than snapping to it
+const AIR_ACCEL    = 1100;
+const FRICTION     = 2200;
 const MAX_RUN      = 335;
+const SPRINT_RUN   = 405;    // keep running and you gradually wind up to this
+const SPRINT_AFTER = 0.85;   // seconds of holding a direction before it kicks in
+const SPRINT_RAMP  = 1.1;    // and how long the wind-up itself takes
 const MAX_FALL     = 1050;
 const COYOTE       = 0.10;   // grace period after walking off a ledge
 const DOUBLE_V     = 0.86;   // the mid-air bounce, as a fraction of a full jump
@@ -184,7 +188,7 @@ const JUMP_BUFFER  = 0.12;   // press jump slightly early and it still fires
 const STOMP_BOUNCE = 625;
 const IFRAMES      = 1.4;
 const MAX_HEARTS   = 5;
-const STAR_TIME    = 8.5;   // Super-Mario-style invincibility
+const STAR_TIME    = 11.05; // Super-Mario-style invincibility (8.5s + 30%)
 
 const WALL_BASE  = 72;    // squish wall speed at the start (px/s)
 const WALL_GAIN  = 0.055; // ...plus this much per metre travelled
@@ -198,6 +202,13 @@ const RAINBOW_LIFT  = 2050;  // hold jump to climb
 const RAINBOW_FALL  = 1150;
 const RAINBOW_VMAX  = 460;
 const CARROT_COIN   = 3;     // sky coins are worth more than ground ones
+
+/* sliding down a slope */
+const SLIDE_ACCEL = 1500;
+const SLIDE_MAX   = 540;
+/* wooden platforms that give way */
+const WOOD_SHAKE  = 0.5;   // warning wobble before it drops
+const WOOD_BACK   = 3.2;   // and how long until it rebuilds itself
 
 /* ------------------------------- save file ------------------------------ */
 const SAVE_KEY = "squishyEscape.save.v1";
@@ -239,6 +250,9 @@ const S = {
   stomp: () => sfx(260, 0.13, "sawtooth", 0.055, -170),
   hurt:  () => sfx(300, 0.28, "sawtooth", 0.07, -220),
   click: () => sfx(600, 0.05, "sine", 0.04),
+  creak: () => sfx(160, 0.22, "sawtooth", 0.045, -50),
+  splash:() => { sfx(520, 0.18, "sine", 0.06, -300); setTimeout(() => sfx(300, 0.22, "sine", 0.05, -180), 60); },
+  slide: () => sfx(240, 0.3, "sawtooth", 0.035, 180),
   star:  () => [0, 60, 120, 180].forEach((d, i) =>
     setTimeout(() => sfx([784, 988, 1175, 1568][i], 0.22, "square", 0.07), d)),
   heart: () => [0, 110].forEach((d, i) => setTimeout(() => sfx([659, 880][i], 0.3, "triangle", 0.07), d)),
@@ -465,7 +479,7 @@ const dupesOfRarity = t => SQUISHIES.filter(s => s.r === t)
 
 /* --------------------------------- input -------------------------------- */
 const keys = Object.create(null);
-const input = { left:false, right:false, jumpHeld:false, jumpPressed:false };
+const input = { left:false, right:false, down:false, jumpHeld:false, jumpPressed:false };
 function setJump(down) {
   if (down && !input.jumpHeld) input.jumpPressed = true;
   input.jumpHeld = down;
@@ -488,8 +502,9 @@ addEventListener("blur", () => { for (const k in keys) keys[k] = false; input.ju
 function pollInput() {
   input.left  = !!(keys.ArrowLeft  || keys.KeyA) || touchState.left;
   input.right = !!(keys.ArrowRight || keys.KeyD) || touchState.right;
+  input.down  = !!(keys.ArrowDown  || keys.KeyS) || touchState.down;
 }
-const touchState = { left:false, right:false };
+const touchState = { left:false, right:false, down:false };
 /* Don't trust a one-shot sniff -- iPadOS Safari defaults to "Request Desktop
    Website", where `ontouchstart` is false. Guess up front, but the real trigger
    is the first actual touch, and we remember it for next time. */
@@ -511,6 +526,7 @@ function bindTouch(el, on, off) {
 }
 bindTouch(document.getElementById("tcLeft"),  () => touchState.left = true,  () => touchState.left = false);
 bindTouch(document.getElementById("tcRight"), () => touchState.right = true, () => touchState.right = false);
+bindTouch(document.getElementById("tcDown"),  () => touchState.down = true,  () => touchState.down = false);
 bindTouch(document.getElementById("tcJump"),  () => setJump(true),           () => setJump(false));
 
 /* ==========================================================================
@@ -621,10 +637,26 @@ const TEMPLATES = [
 "................","................","................","................",
 "................","................","..............o.","...........CC...",
 "........CC......",".....CC.........","..CC.........W..","################"]},
-{ tier:3, rows:[  // sprint
+{ tier:1, rows:[  // the big slide -- hold DOWN on the way down
+"................","................","................","................",
+"................","................","......ooo.......","......>##<......",
+".....>####<.....","....>######<....","...>########<...","################"]},
+{ tier:2, rows:[  // pond crossing on wooden planks
 "................","................","................","................",
 "................","................","................","................",
-"...o.o.o.o.o.o..","................",".......Z........","################"]}
+"......ooo.......","...==..==..==...","...~~~~~~~~~~...","###~~~~~~~~~~###"]},
+{ tier:2, rows:[  // a wooden walkway over a long drop
+"................","................","................","................",
+"................","................","................","................",
+".....ooo........","................","....==...==.....","####.......#####"]},
+{ tier:3, rows:[  // piranha pond
+"................","................","................","................",
+"................","................","................","....o.....o.....",
+"................","..==...==...==..","..~f~~~~f~~~~f..","##~~~~~~~~~~~~##"]},
+{ tier:3, rows:[  // a proper hill -- slide the whole way down
+"................","................","................","................",
+"................",".......ooo......","......>##<......",".....>####<.....",
+"....>######<....","...>########<...","..>##########<6.","################"]}
 ];
 
 /* ------------------------------ world state ----------------------------- */
@@ -666,6 +698,10 @@ function buildChunk(index) {
         case "o": world.coins.push({ x:wx + TILE/2, y:wy + TILE/2, got:false, t:Math.random()*6 }); break;
         case "D": case "S": case "P": case "N": case "B":
           world.hazards.push({ x:wx + TILE/2, y:wy + TILE - 17, kind:ch, t:Math.random()*6 }); break;
+        case "=": world.movers.push({ kind:"P", ci:index, row:r, col:c,
+                    x:wx + TILE/2, y:wy + TILE/2, state:"solid", timer:0, fy:0, vy:0 }); break;
+        case "f": world.movers.push({ kind:"f", x:wx + TILE/2, y0:wy + TILE/2, y:wy + TILE/2,
+                    vy:0, state:"swim", timer:0.6 + Math.random() * 2.2, t:Math.random()*6 }); break;
         case "?": world.hazards.push({ x:wx + TILE/2, y:wy + TILE - 17,
                     kind:"DSPNB"[(Math.random()*5)|0], t:Math.random()*6 }); break;
         case "F": world.movers.push({ kind:"F", x:wx + TILE/2, y0:wy + TILE/2, y:wy + TILE/2,
@@ -678,7 +714,7 @@ function buildChunk(index) {
         case "6": world.enemies.push(makeEnemy(wx + TILE/2, wy + TILE, "6")); break;
         case "7": world.enemies.push(makeEnemy(wx + TILE/2, wy + TILE, "7")); break;
       }
-      line += (ch === "#" || ch === "C") ? ch : ".";
+      line += "#C=><~".indexOf(ch) >= 0 ? ch : (ch === "f" ? "~" : ".");
     }
     solid.push(line);
   }
@@ -722,11 +758,30 @@ function tileAtPx(px, py) {
   if (!t) return ".";
   return t[row][col - ci * COLS] || ".";
 }
-const isSolidPx = (px, py) => { const c = tileAtPx(px, py); return c === "#" || c === "C"; };
+const isSolidPx = (px, py) => { const c = tileAtPx(px, py); return c === "#" || c === "C" || c === "="; };
+const isWaterPx = (px, py) => tileAtPx(px, py) === "~";
+
+/* Slopes are single 45-degree tiles. ">" climbs to the right, "<" drops to the
+   right. This gives the height of the slope surface at a given world x, plus
+   which way is downhill, or null if that spot isn't a slope. */
+function slopeAt(px, py) {
+  const ch = tileAtPx(px, py);
+  if (ch !== ">" && ch !== "<") return null;
+  const col = Math.floor(px / TILE), row = Math.floor(py / TILE);
+  const fx = Math.max(0, Math.min(1, (px - col * TILE) / TILE));
+  return { y: row * TILE + TILE * (ch === ">" ? 1 - fx : fx), dir: ch === ">" ? -1 : 1 };
+}
+
+function setTile(ci, row, col, ch) {
+  const t = world.tiles.get(ci);
+  if (!t) return;
+  t[row] = t[row].substring(0, col) + ch + t[row].substring(col + 1);
+}
 
 /* Axis-separated AABB vs tile collision. Returns what it bumped into. */
 function moveBody(b, dt) {
   const res = { ground:false, ceil:false, wall:false };
+  const wasGround = !!b.onGround;
   // --- horizontal ---
   b.x += b.vx * dt;
   if (b.vx !== 0) {
@@ -761,6 +816,27 @@ function moveBody(b, dt) {
     const row = Math.floor((b.y + b.h) / TILE);
     b.y = row * TILE - b.h - 0.01; b.vy = 0; res.ground = true;
   }
+  /* --- ride up and down slopes --- */
+  res.slope = 0;
+  const footX = b.x + b.w / 2;
+  for (let d = 0; d <= 1; d++) {
+    const sl = slopeAt(footX, b.y + b.h - 2 + d * TILE);
+    if (!sl) continue;
+    const feet = b.y + b.h;
+    // standing on (or sunk into) the ramp
+    if (feet > sl.y - 1 && feet < sl.y + TILE) {
+      b.y = sl.y - b.h; if (b.vy > 0) b.vy = 0;
+      res.ground = true; res.slope = sl.dir;
+      break;
+    }
+    // just stepped off a flat tile onto a downhill ramp -- hug it instead of
+    // launching off the edge
+    if (wasGround && b.vy >= 0 && sl.y > feet && sl.y - feet < 20) {
+      b.y = sl.y - b.h; b.vy = 0;
+      res.ground = true; res.slope = sl.dir;
+      break;
+    }
+  }
   return res;
 }
 
@@ -769,7 +845,8 @@ function moveBody(b, dt) {
    ========================================================================== */
 const game   = { state:"hub", t:0, shake:0, hatch:null };
 const player = { x:100, y:455, w:30, h:40, vx:0, vy:0, prevY:455, onGround:false,
-                 face:1, coyote:0, buffer:0, iframes:0, hearts:3, anim:0, squash:0, combo:0, airJumps:1, star:0 };
+                 face:1, coyote:0, buffer:0, iframes:0, hearts:3, anim:0, squash:0, combo:0, airJumps:1, star:0,
+                 slide:false, slopeDir:0, lastSlope:0, slopeGrace:0, slideSfx:0, runT:0, runDir:0 };
 const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, over:false, endT:0, rainbow:null };
 const trail  = [];   // breadcrumb positions so the companion squishy can follow
 
@@ -779,6 +856,8 @@ function startRun() {
   player.x = 100; player.y = 455; player.vx = player.vy = 0; player.prevY = 455;
   player.onGround = true; player.face = 1; player.coyote = COYOTE; player.buffer = 0;
   player.iframes = 0; player.hearts = 3; player.anim = 0; player.squash = 0; player.combo = 0; player.airJumps = 1; player.star = 0;
+  player.slide = false; player.slopeDir = 0; player.lastSlope = 0;
+  player.slopeGrace = 0; player.slideSfx = 0; player.runT = 0; player.runDir = 0;
   run.money = run.coins = run.stomps = run.dist = 0;
   run.maxX = 100; run.wallX = -420; run.camX = 0; run.over = false; run.endT = 0;
   run.rainbow = null;
@@ -856,7 +935,7 @@ function respawnFromPit() {
   let col = Math.floor(player.x / TILE);
   for (let i = 0; i < 200; i++) {
     const px = (col + i) * TILE + TILE/2;
-    if (isSolidPx(px, (ROWS - 1) * TILE + 4)) {
+    if (isSolidPx(px, (ROWS - 1) * TILE + 4) && !isWaterPx(px, (ROWS - 1) * TILE + 4)) {
       player.x = px - player.w/2;
       player.y = (ROWS - 1) * TILE - player.h - 90;
       player.vx = 0; player.vy = 0;
@@ -976,15 +1055,42 @@ function updatePlay(dt) {
 
   if (!run.over) {
     /* ---- horizontal movement ---- */
-    const accel = player.onGround ? RUN_ACCEL : AIR_ACCEL;
     let dir = (input.right ? 1 : 0) - (input.left ? 1 : 0);
-    if (dir !== 0) {
-      player.vx += dir * accel * dt;
-      player.vx = Math.max(-MAX_RUN, Math.min(MAX_RUN, player.vx));
-      player.face = dir;
-    } else if (player.onGround) {
-      const f = FRICTION * dt;
-      player.vx = Math.abs(player.vx) <= f ? 0 : player.vx - Math.sign(player.vx) * f;
+
+    // hold a direction and the dumpling gradually winds up to a sprint
+    if (dir !== 0 && dir === player.runDir) player.runT += dt;
+    else { player.runT = 0; player.runDir = dir; }
+    const wind = Math.max(0, Math.min(1, (player.runT - SPRINT_AFTER) / SPRINT_RAMP));
+    const topSpeed = MAX_RUN + (SPRINT_RUN - MAX_RUN) * wind;
+
+    /* Sliding: crouch on a slope and gravity does the rest.
+       A hill is built from ramp tiles with flat filler between them, so the
+       slope reading blinks to zero at every junction. Remember the last
+       downhill direction for a moment so one flat tile doesn't kill the slide
+       and leave you stranded halfway down. */
+    if (player.slopeDir !== 0) { player.lastSlope = player.slopeDir; player.slopeGrace = 0.28; }
+    else player.slopeGrace = Math.max(0, player.slopeGrace - dt);
+    const onSlope = player.slopeDir !== 0 || player.slopeGrace > 0;
+
+    player.slide = input.down && player.onGround && onSlope && !run.over;
+    if (player.slide) {
+      const downhill = player.slopeDir !== 0 ? player.slopeDir : player.lastSlope;
+      player.vx += downhill * SLIDE_ACCEL * dt;
+      player.vx = Math.max(-SLIDE_MAX, Math.min(SLIDE_MAX, player.vx));
+      if (downhill !== 0) player.face = downhill;
+      if (!player.slideSfx) { S.slide(); player.slideSfx = 0.35; }
+      player.slideSfx -= dt;
+      if (player.slideSfx < 0) player.slideSfx = 0;
+    } else {
+      const accel = player.onGround ? RUN_ACCEL : AIR_ACCEL;
+      if (dir !== 0) {
+        player.vx += dir * accel * dt;
+        player.vx = Math.max(-topSpeed, Math.min(topSpeed, player.vx));
+        player.face = dir;
+      } else if (player.onGround) {
+        const f = FRICTION * dt;
+        player.vx = Math.abs(player.vx) <= f ? 0 : player.vx - Math.sign(player.vx) * f;
+      }
     }
 
     /* ---- jump: coyote time + input buffering ---- */
@@ -1004,6 +1110,7 @@ function updatePlay(dt) {
 
     player.prevY = player.y;
     const hit = moveBody(player, dt);
+    player.slopeDir = hit.slope || 0;
     if (hit.ground) {
       if (!player.onGround) { player.squash = 0.45; S.land(); }
       player.onGround = true; player.coyote = COYOTE; player.combo = 0; player.airJumps = 1;
@@ -1013,6 +1120,12 @@ function updatePlay(dt) {
     }
     if (player.x < run.wallX - 200) player.x = run.wallX - 200;
     if (player.y > H + 120) respawnFromPit();
+    // a dunking costs a heart, same as a pit
+    if (player.star <= 0 && isWaterPx(player.x + player.w/2, player.y + player.h - 6)) {
+      burst(player.x + player.w/2, player.y + player.h, "#9fd8ff", 18, 240);
+      S.splash();
+      respawnFromPit();
+    }
 
     player.iframes = Math.max(0, player.iframes - dt);
     if (player.star > 0) {
@@ -1027,6 +1140,11 @@ function updatePlay(dt) {
     player.anim += dt * (player.onGround ? Math.abs(player.vx) / 42 : 4);
     player.squash += (0 - player.squash) * Math.min(1, dt * 12);
 
+    if (player.slide && Math.abs(player.vx) > 90 && Math.random() < 0.6) {
+      world.parts.push({ x: player.x + player.w/2 - player.face * 12, y: player.y + player.h - 2,
+        vx: -player.face * (60 + Math.random() * 90), vy: -30 - Math.random() * 60,
+        life: 0, max: 0.35, color: "#ffffff", size: 3 });
+    }
     run.maxX = Math.max(run.maxX, player.x);
     run.dist = Math.max(0, Math.floor((run.maxX - 100) / TILE));
   } else {
@@ -1145,14 +1263,49 @@ function updatePlay(dt) {
         m.timer -= dt;
         if (m.timer <= 0) { m.state = "roll"; m.x = m.x0; m.rot = 0; }
       }
+    } else if (m.kind === "P") {
+      // a wooden platform gives way under YOU -- the 6-7s can stand on it all day
+      if (m.state === "solid") {
+        const top = m.y - TILE/2;
+        const standing = player.onGround && !run.over &&
+          player.x + player.w > m.x - TILE/2 + 2 && player.x < m.x + TILE/2 - 2 &&
+          Math.abs((player.y + player.h) - top) < 7;
+        if (standing) { m.state = "shake"; m.timer = WOOD_SHAKE; S.creak(); }
+      } else if (m.state === "shake") {
+        m.timer -= dt;
+        if (m.timer <= 0) {
+          setTile(m.ci, m.row, m.col, ".");
+          m.state = "fall"; m.timer = WOOD_BACK; m.fy = 0; m.vy = 0;
+          burst(m.x, m.y, "#c9a06a", 12, 170);
+        }
+      } else {
+        m.timer -= dt;
+        m.vy += 1500 * dt; m.fy += m.vy * dt;
+        if (m.timer <= 0) {
+          setTile(m.ci, m.row, m.col, "=");
+          m.state = "solid"; m.fy = 0; m.vy = 0;
+        }
+      }
+    } else if (m.kind === "f") {
+      // piranha: lurks in the water, leaps at whatever is above it
+      m.timer -= dt;
+      if (m.state === "swim") {
+        m.y = m.y0 + Math.sin(m.t * 2.2) * 5;
+        if (m.timer <= 0) { m.state = "leap"; m.vy = -640 - Math.random() * 130; }
+      } else {
+        m.vy += 1700 * dt; m.y += m.vy * dt;
+        if (m.y >= m.y0) { m.y = m.y0; m.state = "swim"; m.timer = 1.3 + Math.random() * 1.8; m.vy = 0; }
+      }
     } else if (m.kind === "Z") {
       m.phase += dt * 2.5;
       m.y = m.y0 - Math.abs(Math.sin(m.phase)) * 118;
     }
     if (run.over || player.star > 0) continue;
+    if (m.kind === "P") continue;                       // platforms are scenery, not spikes
     const gone = (m.kind === "F" || m.kind === "W") && m.state === "gone";
+    const hy = m.kind === "f" ? 24 : 27;
     if (!gone && Math.abs((player.x + player.w/2) - m.x) < 25 &&
-        Math.abs((player.y + player.h/2) - m.y) < 27) hurt();
+        Math.abs((player.y + player.h/2) - m.y) < hy) hurt();
   }
 
   for (const pk of world.pickups) {
@@ -1315,8 +1468,55 @@ function drawTiles(camX) {
     for (let row = 0; row < ROWS; row++) {
       const px = col * TILE, py = row * TILE;
       const ch = tileAtPx(px + 2, py + 2);
-      if (ch !== "#" && ch !== "C") continue;
-      const x = px - camX, open = !isSolidPx(px + 2, py - 4);
+      if ("#C=><~".indexOf(ch) < 0) continue;
+      // a tile is only "open" (and gets the bright top cap) when nothing sits on
+      // it -- a ramp counts as sitting on it, otherwise hills look like stairs
+      const above = tileAtPx(px + 2, py - 4);
+      const x = px - camX, open = !isSolidPx(px + 2, py - 4) && above !== ">" && above !== "<";
+      if (ch === "~") {
+        // water: a translucent body with a moving surface line
+        const surface = !isWaterPx(px + 2, py - 4);
+        ctx.fillStyle = "rgba(96,176,232,.62)";
+        ctx.fillRect(x, py, TILE, TILE + 1);
+        ctx.fillStyle = "rgba(150,214,250,.35)";
+        ctx.fillRect(x, py, TILE, TILE * 0.5);
+        if (surface) {
+          ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 3;
+          ctx.beginPath();
+          for (let sx = 0; sx <= TILE; sx += 6) {
+            const sy = py + 4 + Math.sin((px + sx) * 0.06 + game.t * 3.2) * 3;
+            sx === 0 ? ctx.moveTo(x + sx, sy) : ctx.lineTo(x + sx, sy);
+          }
+          ctx.stroke();
+        }
+        ctx.fillStyle = "rgba(255,255,255,.22)";
+        for (let b = 0; b < 2; b++) {
+          const bx = x + 10 + b * 22, by = py + mod(TILE - (game.t * 22 + b * 30 + px), TILE);
+          ctx.beginPath(); ctx.arc(bx, by, 2.4, 0, 7); ctx.fill();
+        }
+        continue;
+      }
+      if (ch === ">" || ch === "<") {
+        // a 45-degree ramp
+        ctx.fillStyle = "#63c79c";
+        ctx.beginPath();
+        if (ch === ">") { ctx.moveTo(x, py + TILE + 1); ctx.lineTo(x + TILE, py); ctx.lineTo(x + TILE, py + TILE + 1); }
+        else            { ctx.moveTo(x, py); ctx.lineTo(x + TILE, py + TILE + 1); ctx.lineTo(x, py + TILE + 1); }
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = "#a9ecca"; ctx.lineWidth = 7; ctx.lineCap = "round";
+        ctx.beginPath();
+        if (ch === ">") { ctx.moveTo(x + 2, py + TILE - 1); ctx.lineTo(x + TILE - 2, py + 3); }
+        else            { ctx.moveTo(x + 2, py + 3); ctx.lineTo(x + TILE - 2, py + TILE - 1); }
+        ctx.stroke();
+        continue;
+      }
+      if (ch === "=") {
+        const m = world.movers.find(v => v.kind === "P" && Math.abs(v.x - (px + TILE/2)) < 2 &&
+                                          Math.abs(v.y - (py + TILE/2)) < 2);
+        const wob = (m && m.state === "shake") ? Math.sin(game.t * 55) * 3 : 0;
+        drawPlank(x + wob, py);
+        continue;
+      }
       if (ch === "C") {
         ctx.fillStyle = "#efb93f"; rr(x, py, TILE, TILE, 8); ctx.fill();
         ctx.fillStyle = "#ffd76b"; rr(x + 2, py + 2, TILE - 4, TILE * 0.42, 7); ctx.fill();
@@ -1326,7 +1526,9 @@ function drawTiles(camX) {
         }
       } else {
         ctx.fillStyle = "#63c79c"; rr(x, py, TILE, TILE + 1, open ? 9 : 2); ctx.fill();
-        ctx.fillStyle = "#49ac83"; ctx.fillRect(x, py + TILE * 0.55, TILE, TILE * 0.45);
+        // only shade the underside of a surface tile -- shading buried tiles
+        // turns a hillside into stripes
+        if (open) { ctx.fillStyle = "#49ac83"; ctx.fillRect(x, py + TILE * 0.55, TILE, TILE * 0.45); }
         if (open) {
           ctx.fillStyle = "#a9ecca"; rr(x, py, TILE, 12, 8); ctx.fill();
           ctx.fillStyle = "rgba(255,255,255,.55)";
@@ -1335,6 +1537,17 @@ function drawTiles(camX) {
       }
     }
   }
+}
+
+function drawPlank(x, y) {
+  ctx.fillStyle = "#a9793f"; rr(x, y, TILE, TILE * 0.62, 5); ctx.fill();
+  ctx.fillStyle = "#c99a5c"; rr(x + 1, y + 1, TILE - 2, TILE * 0.34, 4); ctx.fill();
+  ctx.strokeStyle = "rgba(110,74,36,.55)"; ctx.lineWidth = 1.6;
+  for (let i = 1; i < 3; i++) {
+    ctx.beginPath(); ctx.moveTo(x + i * TILE/3, y + 3); ctx.lineTo(x + i * TILE/3, y + TILE * 0.55); ctx.stroke();
+  }
+  ctx.fillStyle = "rgba(90,60,30,.5)";
+  ctx.beginPath(); ctx.arc(x + 7, y + 8, 1.8, 0, 7); ctx.arc(x + TILE - 7, y + 8, 1.8, 0, 7); ctx.fill();
 }
 
 /* ------------------------------ collectibles ---------------------------- */
@@ -1415,6 +1628,41 @@ function drawStar(pk, camX, t) {
 function drawMover(m, camX, t) {
   const x = m.x - camX, gone = (m.kind === "F" || m.kind === "W") && m.state === "gone";
   if (gone) return;
+  if (m.kind === "P") {
+    // only draw the plank here once it has broken away and is tumbling
+    if (m.state === "fall" && m.fy < H) {
+      ctx.save(); ctx.translate(x, m.y - TILE/2 + m.fy); ctx.rotate(m.fy * 0.004);
+      ctx.globalAlpha = Math.max(0, 1 - m.fy / 420);
+      drawPlank(-TILE/2, 0);
+      ctx.restore(); ctx.globalAlpha = 1;
+    }
+    return;
+  }
+  if (m.kind === "f") {
+    const up = m.state === "leap";
+    ctx.save(); ctx.translate(x, m.y);
+    ctx.rotate(up ? Math.max(-0.8, Math.min(0.8, m.vy / 700)) : Math.sin(t * 3 + m.t) * 0.12);
+    ctx.fillStyle = "#c94f7a";
+    ctx.beginPath();
+    ctx.moveTo(16, 0); ctx.quadraticCurveTo(2, -13, -12, 0);
+    ctx.quadraticCurveTo(2, 13, 16, 0); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(-21, -9); ctx.lineTo(-21, 9); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#e8759c";
+    ctx.beginPath(); ctx.ellipse(0, 2, 9, 5, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(8, -3, 3.4, 0, 7); ctx.fill();
+    ctx.fillStyle = "#3a2030";
+    ctx.beginPath(); ctx.arc(9, -3, 1.8, 0, 7); ctx.fill();
+    // teeth
+    ctx.fillStyle = "#fff";
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.moveTo(15 - i * 4, 1); ctx.lineTo(13 - i * 4, 5); ctx.lineTo(11.5 - i * 4, 1);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+    return;
+  }
   if (m.kind === "F") {
     // a dumpling hanging in the air, wobbling harder the closer it is to dropping
     const shake = m.state === "hang" ? 0 : Math.sin(t * 40) * 2;
@@ -1553,6 +1801,7 @@ function drawEnemy(e, camX, t) {
 function drawDumplingHero(cx, footY, scale, t, opts) {
   const o = opts || {};
   const run = o.run || 0, air = o.air || 0, sq = o.squash || 0, face = o.face || 1;
+  const slide = !!o.slide;
   const w = 46 * scale * (1 - sq * 0.55), h = 46 * scale * (1 + sq * 0.55);
   const cy = footY - h * 0.5 - 6 * scale;
   const swing = Math.sin(run) * 0.9;
@@ -1561,11 +1810,23 @@ function drawDumplingHero(cx, footY, scale, t, opts) {
   ctx.beginPath(); ctx.ellipse(cx, footY + 4, 20 * scale, 5 * scale, 0, 0, 7); ctx.fill();
 
   ctx.save(); ctx.translate(cx, cy); ctx.scale(face, 1);
+  if (slide) ctx.rotate(-0.22);
 
-  // legs
+  // legs -- tucked forward when sliding
   ctx.strokeStyle = "#e8a889"; ctx.lineWidth = 6.5 * scale; ctx.lineCap = "round";
   const legY = h * 0.42, legLen = 13 * scale;
   for (const s of [-1, 1]) {
+    if (slide) {
+      ctx.beginPath();
+      ctx.moveTo(s * 7 * scale, legY);
+      ctx.lineTo(s * 7 * scale + 13 * scale, legY + 3 * scale);
+      ctx.stroke();
+      ctx.fillStyle = "#f8c3a4";
+      ctx.beginPath();
+      ctx.ellipse(s * 7 * scale + 15 * scale, legY + 4 * scale, 6 * scale, 4 * scale, 0, 0, 7);
+      ctx.fill();
+      continue;
+    }
     const kick = air ? (s > 0 ? -0.5 : 0.35) : swing * s;
     ctx.beginPath();
     ctx.moveTo(s * 8 * scale, legY);
@@ -1576,9 +1837,19 @@ function drawDumplingHero(cx, footY, scale, t, opts) {
     ctx.ellipse(s * 8 * scale + kick * 11 * scale, legY + legLen + 2 * scale, 6 * scale, 4 * scale, 0, 0, 7);
     ctx.fill();
   }
-  // arms
+  // arms -- straight up in the air on a slide, wheee
   ctx.strokeStyle = "#e8a889"; ctx.lineWidth = 5.6 * scale;
   for (const s of [-1, 1]) {
+    if (slide) {
+      ctx.beginPath();
+      ctx.moveTo(s * w * 0.34, -h * 0.16);
+      ctx.lineTo(s * w * 0.46, -h * 0.62);
+      ctx.stroke();
+      ctx.fillStyle = "#f8c3a4";
+      ctx.beginPath();
+      ctx.arc(s * w * 0.47, -h * 0.66, 4.4 * scale, 0, 7); ctx.fill();
+      continue;
+    }
     const a = air ? -1.1 : -swing * s * 0.8;
     ctx.beginPath();
     ctx.moveTo(s * w * 0.42, -h * 0.02);
@@ -1627,7 +1898,8 @@ function drawPlayer(camX, t) {
     ctx.fillStyle = glow;
     ctx.beginPath(); ctx.arc(player.x + player.w/2 - camX, player.y + player.h/2, 46, 0, 7); ctx.fill();
     drawDumplingHero(player.x + player.w/2 - camX, player.y + player.h, 1, t, {
-      run: player.anim, air: player.onGround ? 0 : 1, squash: player.squash, face: player.face });
+      run: player.anim, air: player.onGround ? 0 : 1, squash: player.squash,
+      face: player.face, slide: player.slide });
     // a cycling rainbow rim rather than a wash, so the face still reads
     ctx.globalCompositeOperation = "source-over";
     ctx.globalAlpha = fading ? 0.4 : 0.85;
@@ -1640,7 +1912,8 @@ function drawPlayer(camX, t) {
     return;
   }
   drawDumplingHero(player.x + player.w/2 - camX, player.y + player.h, 1, t, {
-    run: player.anim, air: player.onGround ? 0 : 1, squash: player.squash, face: player.face
+    run: player.anim, air: player.onGround ? 0 : 1, squash: player.squash,
+    face: player.face, slide: player.slide
   });
 }
 
@@ -2087,6 +2360,9 @@ function menuHelp() {
     <div class="tradeRow"><span>⭐ The glowing star</span><span>invincible for 8 seconds —<br>run straight through everything</span></div>
     <div class="tradeRow"><span>🥕 The glowing carrot</span><span>launches you onto a rainbow!<br>hold jump to fly up, let go to drop</span></div>
     <div class="tradeRow"><span>Grab over half the<br>rainbow coins</span><span>you get a heart back (up to 5)</span></div>
+    <div class="tradeRow"><span>⬇️ or S on a slope</span><span>slide down with your arms up!</span></div>
+    <div class="tradeRow"><span>Wooden planks</span><span>they wobble, then give way —<br>keep moving, they rebuild</span></div>
+    <div class="tradeRow"><span>Water</span><span>costs a heart, and there are<br>piranhas in there</span></div>
     <div class="tradeRow"><span>Watch out</span><span>dumplings drop from above,<br>cheese wheels roll at you,<br>strawberries bounce</span></div>
     <div class="tradeRow"><span>P or Esc</span><span>pause</span></div>
     <div class="tradeRow"><span>M</span><span>mute / unmute</span></div>
