@@ -68,6 +68,8 @@
   }
   h2{margin:.1em 0 .5em;font-size:clamp(16px,3.2vmin,30px)}
   p.sub{margin:.2em 0 1em;color:var(--ink-soft);font-size:clamp(11px,2vmin,17px);font-weight:600}
+  .ver{display:inline-block;margin-left:.35em;padding:.12em .5em;border-radius:99px;
+    background:var(--lav);color:var(--ink);font-size:.82em;font-weight:800;letter-spacing:.01em}
   .stats{display:flex;gap:.5em;justify-content:center;flex-wrap:wrap;margin:.6em 0 1em}
   .stat{background:var(--mint);border-radius:14px;padding:.5em .8em;font-weight:800;font-size:clamp(11px,2vmin,17px)}
   .stat b{display:block;font-size:clamp(14px,2.8vmin,24px)}
@@ -150,7 +152,7 @@
 <script>
 /* =====================================================================
    SQUISHY ESCAPE
-   by Annie Smith, Ash Smith & Computer Smith
+   by Annie Smith & Ash Smith
    ---------------------------------------------------------------------
    A 2D side-scroller. Run right, jump obstacles, stomp the 6-7s, outrun
    the squish wall, spend Dumpleningness on better eggs, hatch rarer
@@ -160,6 +162,8 @@
 "use strict";
 
 /* ------------------------------ constants ------------------------------ */
+const VERSION = "1.3.0";           // major.minor.patch -- bump minor for features
+
 const W = 960, H = 540;            // virtual resolution
 const TILE = 45;                   // tile size
 const ROWS = 12;                   // rows per chunk (12 * 45 = 540)
@@ -179,6 +183,8 @@ const DOUBLE_V     = 0.86;   // the mid-air bounce, as a fraction of a full jump
 const JUMP_BUFFER  = 0.12;   // press jump slightly early and it still fires
 const STOMP_BOUNCE = 625;
 const IFRAMES      = 1.4;
+const MAX_HEARTS   = 5;
+const STAR_TIME    = 8.5;   // Super-Mario-style invincibility
 
 const WALL_BASE  = 72;    // squish wall speed at the start (px/s)
 const WALL_GAIN  = 0.055; // ...plus this much per metre travelled
@@ -233,6 +239,9 @@ const S = {
   stomp: () => sfx(260, 0.13, "sawtooth", 0.055, -170),
   hurt:  () => sfx(300, 0.28, "sawtooth", 0.07, -220),
   click: () => sfx(600, 0.05, "sine", 0.04),
+  star:  () => [0, 60, 120, 180].forEach((d, i) =>
+    setTimeout(() => sfx([784, 988, 1175, 1568][i], 0.22, "square", 0.07), d)),
+  heart: () => [0, 110].forEach((d, i) => setTimeout(() => sfx([659, 880][i], 0.3, "triangle", 0.07), d)),
   carrot:() => [0, 70, 140, 210, 300, 400].forEach((d, i) =>
     setTimeout(() => sfx([523, 659, 784, 1046, 1318, 1568][i], 0.3, "triangle", 0.075), d)),
   crack: () => sfx(220, 0.08, "square", 0.06, 120),
@@ -268,6 +277,10 @@ const SECTIONS = {
     lead: [81, 79, 76, 79, 84, 81, 79, 76, 74, 76, 79, 76, 72, 74, 76, 79],
     roots: [48, 53, 55, 55], bassEvery: 2,
     kick: "x..x..x.x..x..x.", snare: "....x.......x...", hat: "x.x.x.x.x.x.x.x." },
+  star: { bpm: 168, wave: "square", arp: true, swing: 0,
+    lead: [79, 84, 88, 84, 79, 84, 88, 91, 88, 84, 81, 84, 88, 84, 81, 79],
+    roots: [48, 48, 53, 55], bassEvery: 2,
+    kick: "x.x.x.x.x.x.x.x.", snare: "....x.......x...", hat: "xxxxxxxxxxxxxxxx" },
   rainbow: { bpm: 152, wave: "triangle", arp: true, swing: 0,
     lead: [84, 88, 91, 88, 93, 91, 88, 84, 86, 88, 91, 93, 91, 88, 86, 84],
     roots: [48, 53, 55, 53], bassEvery: 2,
@@ -311,6 +324,7 @@ const MUSIC = {
   pickSection() {
     if (this.mode === "hub") { this.sec = SECTIONS.hub; this.level = -1; return; }
     if (this.mode === "rainbow") { this.sec = SECTIONS.rainbow; this.level = -2; return; }
+    if (this.mode === "star")    { this.sec = SECTIONS.star;    this.level = -3; return; }
     // these thresholds line up with where the course unlocks harder chunks
     const lvl = run.dist < 80 ? 0 : run.dist < 176 ? 1 : run.dist < 320 ? 2 : 3;
     if (lvl !== this.level) { this.level = lvl; this.sec = SECTIONS[lvl]; }
@@ -524,10 +538,10 @@ const TEMPLATES = [
 "................","................","................","................",
 "................","................","................","................",
 ".....o....o.....","................",".....6.....7....","################"]},
-{ tier:0, rows:[  // snack hazards
+{ tier:0, rows:[  // a row of snacks (randomised each run)
 "................","................","................","................",
 "................","................","................","................",
-"...o...o...o....","................","...D...S...P....","################"]},
+"...o...o...o....","................","...?...?...?....","################"]},
 { tier:0, rows:[  // little hop
 "................","................","................","................",
 "................","................","................","................",
@@ -536,27 +550,27 @@ const TEMPLATES = [
 { tier:1, rows:[  // stomp chain -- bounce along the row for a combo
 "................","................","................","................",
 "................","................","................","................",
-".......ooo......","................","...6..6..6..7...","################"]},
-{ tier:1, rows:[  // up and over
+".......ooo......","................","...6...6...7....","################"]},
+{ tier:1, rows:[  // up and over, with something hanging overhead
 "................","................","................","................",
-"................","................",".........ooo....","........#####...",
-"................","...####.........",".............6..","################"]},
-{ tier:1, rows:[  // cheese steps
+"...........F....","................",".........ooo....","........#####...",
+"................","...####.........","................","################"]},
+{ tier:1, rows:[  // cheese steps and a runaway wheel
 "................","................","................","................",
 "................","................","................","...........oo...",
-"...........CC...","........CC......",".....CC.........","################"]},
-{ tier:1, rows:[  // butter slide
+"...........CC...","........CC......",".....CC......W..","################"]},
+{ tier:1, rows:[  // slippery row
 "................","................","................","................",
 "................","................","................","................",
-"..o.....o....o..","................","..B.....B....B..","################"]},
+"..o.....o....o..","................","..?.....?....?..","################"]},
 { tier:1, rows:[  // high road
 "................","................","................","................",
 "................","................","................","....ooooo.......",
 "................","...#######......","..........6.....","################"]},
-{ tier:1, rows:[  // two little gaps
+{ tier:1, rows:[  // two little gaps, two bouncers
 "................","................","................","................",
 "................","................","................","................",
-"................",".....o......o...","................","#####...####...#"]},
+"................",".....o......o...","..Z.....Z.......","#####...####...#"]},
 /* ---- tier 2 ---- */
 { tier:2, rows:[  // 6-7s on patrol
 "................","................","................","................",
@@ -565,66 +579,66 @@ const TEMPLATES = [
 { tier:2, rows:[  // coins over the gap
 "................","................","................","................",
 "................","................","................","................",
-"................","......oooo......","..6..........7..","######....######"]},
-{ tier:2, rows:[  // a pair of fidget rings
-"................","................","................","................",
+"................","......oooo......","..6.............","######....######"]},
+{ tier:2, rows:[  // rings, and something waiting above
+"................","................","................","...........F....",
 "................",".....R....R.....","................","................",
-".......ooo......","................","....6......7....","################"]},
+".......ooo......","................","....6...........","################"]},
 { tier:2, rows:[  // staircase up
 "................","................","................","................",
 "................","................",".............o..",".......o.....##.",
-"..........##....",".......##.......","....##..........","################"]},
+"..........##....",".......##.......","....##........W.","################"]},
 { tier:2, rows:[  // pit with an island
 "................","................","................","................",
 "................","................","................","................",
-"................",".....ooo........","................","####..##...#####"]},
+"................",".....ooo........",".Z...........Z..","####..##...#####"]},
 /* ---- tier 3: mean ---- */
 { tier:3, rows:[  // stepping stones patrolled by 6-7s
 "................","................","................","................",
 "................","................","................","................",
-"...ooo....ooo...","................","..6.....6.....7.","####..####..####"]},
+"...ooo....ooo...","................","..6...........7.","####..####..####"]},
 { tier:3, rows:[  // ring alley
 "................","................","................","..R..R..R..R....",
 "................","................","................","................",
-"....ooo.........","................","...N.......6....","################"]},
+"....ooo.........","................","...N............","################"]},
 { tier:3, rows:[  // the gauntlet
 "................","................","................","................",
 ".....R.....R....","................","................",".......o........",
-"................","...##......##...","..D..6..N..7..P.","################"]},
-{ tier:3, rows:[  // double gap
+"................","...##......##...","..?..6..?.....?.","################"]},
+{ tier:3, rows:[  // double gap with droppers
 "................","................","................","................",
-"................","................","................","................",
+"....F......F....","................","................","................",
 "..ooo......ooo..","................","................","####...####...##"]},
 { tier:3, rows:[  // high wire
 "................","................","................","................",
 "................","................","................","......oooo......",
-".....6....7.....","..############..","................","################"]},
+".....6..........","..############..","................","################"]},
 { tier:3, rows:[  // paw path
 "................","................","................","................",
 "................","................","................","................",
-"..o...o...o...o.","................",".P...P...P...P..","################"]},
+"..o...o...o...o.","................",".?...?...?...?..","################"]},
 { tier:3, rows:[  // cheese tower
 "................","................","................","................",
 "................","................","..............o.","...........CC...",
-"........CC......",".....CC.........","..CC.........6..","################"]},
+"........CC......",".....CC.........","..CC.........W..","################"]},
 { tier:3, rows:[  // sprint
 "................","................","................","................",
 "................","................","................","................",
-"...o.o.o.o.o.o..","................",".......7........","################"]}
+"...o.o.o.o.o.o..","................",".......Z........","################"]}
 ];
 
 /* ------------------------------ world state ----------------------------- */
 const world = {
   tiles: new Map(),   // chunk index -> array of 12 strings (solids only)
   built: -1,          // highest chunk index generated so far
-  coins: [], hazards: [], enemies: [], rings: [], parts: [], texts: [], carrots: [], lastCarrot: -99
+  coins: [], hazards: [], enemies: [], rings: [], parts: [], texts: [], pickups: [], movers: [], lastPickup: -99
 };
 
 function resetWorld() {
   world.tiles.clear(); world.built = -1;
   world.coins.length = world.hazards.length = 0;
   world.enemies.length = world.rings.length = world.parts.length = world.texts.length = 0;
-  world.carrots.length = 0; world.lastCarrot = -99;
+  world.pickups.length = 0; world.movers.length = 0; world.lastPickup = -99;
   for (let i = 0; i <= 3; i++) buildChunk(i);
 }
 
@@ -652,6 +666,14 @@ function buildChunk(index) {
         case "o": world.coins.push({ x:wx + TILE/2, y:wy + TILE/2, got:false, t:Math.random()*6 }); break;
         case "D": case "S": case "P": case "N": case "B":
           world.hazards.push({ x:wx + TILE/2, y:wy + TILE - 17, kind:ch, t:Math.random()*6 }); break;
+        case "?": world.hazards.push({ x:wx + TILE/2, y:wy + TILE - 17,
+                    kind:"DSPNB"[(Math.random()*5)|0], t:Math.random()*6 }); break;
+        case "F": world.movers.push({ kind:"F", x:wx + TILE/2, y0:wy + TILE/2, y:wy + TILE/2,
+                    vy:0, state:"hang", timer:0, t:Math.random()*6 }); break;
+        case "W": world.movers.push({ kind:"W", x0:wx + TILE/2, x:wx + TILE/2, y:wy + TILE - 19,
+                    vx:-118, rot:0, state:"roll", timer:0, t:0 }); break;
+        case "Z": world.movers.push({ kind:"Z", x:wx + TILE/2, y0:wy + TILE - 17, y:wy + TILE - 17,
+                    phase:Math.random()*3, t:0 }); break;
         case "R": world.rings.push({ x:wx + TILE/2, y:wy + TILE/2, base:wy + TILE/2, a:Math.random()*6.28 }); break;
         case "6": world.enemies.push(makeEnemy(wx + TILE/2, wy + TILE, "6")); break;
         case "7": world.enemies.push(makeEnemy(wx + TILE/2, wy + TILE, "7")); break;
@@ -660,17 +682,19 @@ function buildChunk(index) {
     }
     solid.push(line);
   }
-  /* Every so often, tuck a magical carrot somewhere jumpable. Never two close
-     together -- it should feel like a lucky find, not a pickup line. */
-  if (index >= 3 && index - world.lastCarrot >= 7 && Math.random() < 0.42) {
+  /* Every so often, tuck a special pickup somewhere jumpable. Never two close
+     together -- it should feel like a lucky find, not a pickup line.
+     Most of them are stars; the carrot is the rarer treat. */
+  if (index >= 3 && index - world.lastPickup >= 5 && Math.random() < 0.5) {
     const spots = [];
     for (let c = 2; c < COLS - 2; c++) {
       if (solid[ROWS - 1][c] === "#" && solid[8][c] === "." && solid[7][c] === "." && solid[9][c] === ".") spots.push(c);
     }
     if (spots.length) {
       const c = spots[(Math.random() * spots.length) | 0];
-      world.carrots.push({ x: index * CHUNK_W + c * TILE + TILE/2, y: 8 * TILE + TILE/2, got: false, t: Math.random() * 6 });
-      world.lastCarrot = index;
+      world.pickups.push({ x: index * CHUNK_W + c * TILE + TILE/2, y: 8 * TILE + TILE/2,
+                           kind: Math.random() < 0.6 ? "star" : "carrot", got: false, t: Math.random() * 6 });
+      world.lastPickup = index;
     }
   }
 
@@ -745,7 +769,7 @@ function moveBody(b, dt) {
    ========================================================================== */
 const game   = { state:"hub", t:0, shake:0, hatch:null };
 const player = { x:100, y:455, w:30, h:40, vx:0, vy:0, prevY:455, onGround:false,
-                 face:1, coyote:0, buffer:0, iframes:0, hearts:3, anim:0, squash:0, combo:0, airJumps:1 };
+                 face:1, coyote:0, buffer:0, iframes:0, hearts:3, anim:0, squash:0, combo:0, airJumps:1, star:0 };
 const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, over:false, endT:0, rainbow:null };
 const trail  = [];   // breadcrumb positions so the companion squishy can follow
 
@@ -754,7 +778,7 @@ function startRun() {
   resetWorld();
   player.x = 100; player.y = 455; player.vx = player.vy = 0; player.prevY = 455;
   player.onGround = true; player.face = 1; player.coyote = COYOTE; player.buffer = 0;
-  player.iframes = 0; player.hearts = 3; player.anim = 0; player.squash = 0; player.combo = 0; player.airJumps = 1;
+  player.iframes = 0; player.hearts = 3; player.anim = 0; player.squash = 0; player.combo = 0; player.airJumps = 1; player.star = 0;
   run.money = run.coins = run.stomps = run.dist = 0;
   run.maxX = 100; run.wallX = -420; run.camX = 0; run.over = false; run.endT = 0;
   run.rainbow = null;
@@ -787,8 +811,19 @@ function endRun(cause) {
   persist();
 }
 
+function grabStar(cx, cy) {
+  player.star = STAR_TIME;
+  game.shake = 10;
+  S.star();
+  MUSIC.setMode("star");
+  floatText(cx, cy - 20, "INVINCIBLE!", "#ffe97a");
+  for (let i = 0; i < 5; i++) {
+    burst(cx, cy, ["#ffe97a","#fff6c2","#ffd36b","#ffffff","#ffb3d4"][i], 8, 300);
+  }
+}
+
 function hurt() {
-  if (player.iframes > 0 || run.over) return;
+  if (player.iframes > 0 || run.over || player.star > 0) return;
   player.hearts--; player.iframes = IFRAMES; player.combo = 0;
   player.vy = -320; player.vx = -220 * player.face;
   game.shake = 11; S.hurt();
@@ -862,10 +897,18 @@ function endRainbow() {
   player.y = (ROWS - 1) * TILE - player.h - 210;
   player.vx = 0; player.vy = 0; player.onGround = false;
   player.airJumps = 1; player.iframes = 0.9;
+  // collect more than half the rainbow and you earn a heart back
+  const R = run.rainbow;
+  if (R && R.coins.length && R.got / R.coins.length > 0.5 && player.hearts < MAX_HEARTS) {
+    player.hearts++;
+    S.heart();
+    floatText(player.x + player.w/2, player.y - 10, "+1 HEART!", "#ff9fc4");
+    burst(player.x + player.w/2, player.y, "#ff9fc4", 22, 260);
+  }
   // the wall waited for you -- park it at the leash so it doesn't snap forward
   run.wallX = player.x - WALL_LEASH + 60;
   run.rainbow = null;
-  MUSIC.setMode("run");
+  MUSIC.setMode(player.star > 0 ? "star" : "run");
 }
 
 function updateRainbow(dt) {
@@ -972,6 +1015,15 @@ function updatePlay(dt) {
     if (player.y > H + 120) respawnFromPit();
 
     player.iframes = Math.max(0, player.iframes - dt);
+    if (player.star > 0) {
+      player.star -= dt;
+      if (Math.random() < 0.55) {
+        world.parts.push({ x: player.x + Math.random() * player.w, y: player.y + Math.random() * player.h,
+          vx: (Math.random() - 0.5) * 90, vy: -40 - Math.random() * 90, life: 0, max: 0.45,
+          color: ["#ffe97a","#fff6c2","#ffd36b","#ffffff"][(Math.random()*4)|0], size: 3 });
+      }
+      if (player.star <= 0) { player.star = 0; MUSIC.setMode("run"); }
+    }
     player.anim += dt * (player.onGround ? Math.abs(player.vx) / 42 : 4);
     player.squash += (0 - player.squash) * Math.min(1, dt * 12);
 
@@ -1020,7 +1072,13 @@ function updatePlay(dt) {
     // stomp vs bump
     if (overlap(player, e)) {
       const fell = player.vy > 60 && (player.prevY + player.h) <= e.y + 14;
-      if (fell) {
+      if (player.star > 0 && !fell) {
+        e.dead = 0.001; e.vx = 0;
+        run.stomps++; run.money += 5; game.shake = 5;
+        sfx(700, 0.1, "square", 0.05, 400);
+        floatText(e.x + e.w/2, e.y, "+5", "#ffe97a");
+        burst(e.x + e.w/2, e.y + e.h/2, "#ffe97a", 14);
+      } else if (fell) {
         e.dead = 0.001; e.vx = 0;
         player.combo++;
         const pay = 5 * player.combo;
@@ -1052,21 +1110,66 @@ function updatePlay(dt) {
   }
   for (const hz of world.hazards) {
     hz.t += dt;
-    if (run.over) continue;
+    if (run.over || player.star > 0) continue;
     if (player.x + player.w - 5 > hz.x - 15 && player.x + 5 < hz.x + 15 &&
         player.y + player.h > hz.y - 14 && player.y < hz.y + 17) hurt();
   }
-  for (const ct of world.carrots) {
-    if (ct.got) continue;
-    ct.t += dt;
+  /* the things that move: droppers, rolling cheese wheels, bouncing berries */
+  for (const m of world.movers) {
+    if (m.x < run.wallX - 600 || m.x > player.x + W + 200) continue;
+    m.t += dt;
+    if (m.kind === "F") {
+      if (m.state === "hang") {
+        const near = Math.abs((player.x + player.w/2) - m.x) < 58 && (player.y + player.h) > m.y;
+        if (near) { m.state = "fall"; m.vy = 0; }
+      } else if (m.state === "fall") {
+        m.vy = Math.min(1500, m.vy + 2600 * dt);
+        m.y += m.vy * dt;
+        if (isSolidPx(m.x, m.y + 18) || m.y > H + 60) {
+          if (m.y <= H + 60) { burst(m.x, m.y + 10, "#ffd3ad", 14, 190); game.shake = 5; }
+          m.state = "gone"; m.timer = 2.4;
+        }
+      } else {
+        m.timer -= dt;
+        if (m.timer <= 0) { m.state = "hang"; m.y = m.y0; m.vy = 0; }
+      }
+    } else if (m.kind === "W") {
+      if (m.state === "roll") {
+        m.x += m.vx * dt; m.rot += m.vx * dt * 0.055;
+        const ahead = m.x + (m.vx < 0 ? -20 : 20);
+        if (isSolidPx(ahead, m.y) || !isSolidPx(ahead, m.y + 26)) {
+          burst(m.x, m.y, "#f7cf6b", 12, 200);
+          m.state = "gone"; m.timer = 2.2;
+        }
+      } else {
+        m.timer -= dt;
+        if (m.timer <= 0) { m.state = "roll"; m.x = m.x0; m.rot = 0; }
+      }
+    } else if (m.kind === "Z") {
+      m.phase += dt * 2.5;
+      m.y = m.y0 - Math.abs(Math.sin(m.phase)) * 118;
+    }
+    if (run.over || player.star > 0) continue;
+    const gone = (m.kind === "F" || m.kind === "W") && m.state === "gone";
+    if (!gone && Math.abs((player.x + player.w/2) - m.x) < 25 &&
+        Math.abs((player.y + player.h/2) - m.y) < 27) hurt();
+  }
+
+  for (const pk of world.pickups) {
+    if (pk.got) continue;
+    pk.t += dt;
     if (run.over) continue;
-    const dx = (player.x + player.w/2) - ct.x, dy = (player.y + player.h/2) - ct.y;
-    if (dx*dx + dy*dy < 34*34) { ct.got = true; startRainbow(ct.x, ct.y); return; }
+    const dx = (player.x + player.w/2) - pk.x, dy = (player.y + player.h/2) - pk.y;
+    if (dx*dx + dy*dy < 34*34) {
+      pk.got = true;
+      if (pk.kind === "carrot") { startRainbow(pk.x, pk.y); return; }
+      grabStar(pk.x, pk.y);
+    }
   }
   for (const rg of world.rings) {
     rg.a += dt * 2.2;
     rg.y = rg.base + Math.sin(rg.a * 0.8) * 34;
-    if (run.over) continue;
+    if (run.over || player.star > 0) continue;
     const dx = (player.x + player.w/2) - rg.x, dy = (player.y + player.h/2) - rg.y;
     if (dx*dx + dy*dy < 30*30) hurt();
   }
@@ -1099,8 +1202,9 @@ function updatePlay(dt) {
 const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
 function syncHud() {
+  const h = Math.max(0, player.hearts);
   document.getElementById("hearts").textContent =
-    "💗".repeat(Math.max(0, player.hearts)) + "🤍".repeat(Math.max(0, 3 - player.hearts));
+    (player.star > 0 ? "⭐ " : "") + "💗".repeat(h) + "🤍".repeat(Math.max(0, 3 - h));
   document.getElementById("hudMoney").textContent = run.money;
   document.getElementById("hudDist").textContent = run.dist;
 }
@@ -1286,6 +1390,73 @@ function drawHazard(hz, camX, t) {
   }
   ctx.restore();
 }
+function drawStar(pk, camX, t) {
+  const x = pk.x - camX, y = pk.y + Math.sin(t * 2.4 + pk.t) * 7;
+  const pulse = 0.72 + Math.sin(t * 6 + pk.t) * 0.28;
+  const g = ctx.createRadialGradient(x, y, 3, x, y, 50 * pulse);
+  g.addColorStop(0, "rgba(255,255,220,.95)");
+  g.addColorStop(0.4, "rgba(255,220,110,.42)");
+  g.addColorStop(1, "rgba(255,220,110,0)");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 50 * pulse, 0, 7); ctx.fill();
+  ctx.save(); ctx.translate(x, y); ctx.rotate(Math.sin(t * 1.4 + pk.t) * 0.3);
+  const sg = ctx.createLinearGradient(0, -20, 0, 20);
+  sg.addColorStop(0, "#fff6b0"); sg.addColorStop(1, "#ffbe2e");
+  ctx.fillStyle = sg; ctx.strokeStyle = "#f0a010"; ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI/2 + i * Math.PI/5, r = i % 2 ? 8.5 : 20;
+    i ? ctx.lineTo(Math.cos(a)*r, Math.sin(a)*r) : ctx.moveTo(Math.cos(a)*r, Math.sin(a)*r);
+  }
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  eyes(0, 1, 20, 0, Math.sin(t * 2.2 + pk.t) > 0.92, "#8a5a10");
+  ctx.restore();
+}
+
+function drawMover(m, camX, t) {
+  const x = m.x - camX, gone = (m.kind === "F" || m.kind === "W") && m.state === "gone";
+  if (gone) return;
+  if (m.kind === "F") {
+    // a dumpling hanging in the air, wobbling harder the closer it is to dropping
+    const shake = m.state === "hang" ? 0 : Math.sin(t * 40) * 2;
+    ctx.fillStyle = "rgba(60,45,75,.13)";
+    ctx.beginPath(); ctx.ellipse(x, (ROWS-1)*TILE - 4, 16, 4, 0, 0, 7); ctx.fill();
+    ctx.save(); ctx.translate(x + shake, m.y);
+    ctx.fillStyle = "#ffe0c4"; rr(-18, -15, 36, 30, 14); ctx.fill();
+    ctx.fillStyle = "#ffc9a0";
+    for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.arc(i * 7.5, -14, 5.2, Math.PI, 0); ctx.fill(); }
+    ctx.strokeStyle = "#b8806a"; ctx.lineWidth = 2.6; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(-11, -6); ctx.lineTo(-4, -3); ctx.moveTo(11, -6); ctx.lineTo(4, -3); ctx.stroke();
+    eyes(0, 3, 21, 0, false, "#7a5c4e");
+    ctx.restore();
+  } else if (m.kind === "W") {
+    ctx.save(); ctx.translate(x, m.y); ctx.rotate(m.rot);
+    ctx.fillStyle = "#efb93f"; ctx.beginPath(); ctx.arc(0, 0, 19, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ffd76b"; ctx.beginPath(); ctx.arc(0, 0, 15, 0, 7); ctx.fill();
+    ctx.fillStyle = "#d6a136";
+    for (const [hx, hy, hr] of [[-6, -3, 3.6], [5, 4, 4.4], [3, -7, 2.6]]) {
+      ctx.beginPath(); ctx.arc(hx, hy, hr, 0, 7); ctx.fill();
+    }
+    ctx.strokeStyle = "#c98f28"; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.arc(0, 0, 19, 0, 7); ctx.stroke();
+    ctx.restore();
+  } else {
+    // bouncing strawberry
+    const squash = Math.abs(Math.sin(m.phase)) < 0.12 ? 0.28 : 0;
+    ctx.fillStyle = "rgba(60,45,75,.13)";
+    ctx.beginPath(); ctx.ellipse(x, m.y0 + 15, 14 - squash * 10, 4, 0, 0, 7); ctx.fill();
+    ctx.save(); ctx.translate(x, m.y); ctx.scale(1 + squash, 1 - squash);
+    ctx.fillStyle = "#ff8fa8"; ctx.beginPath();
+    ctx.moveTo(0, 16); ctx.quadraticCurveTo(-18, 2, -13, -8);
+    ctx.quadraticCurveTo(-6, -16, 0, -10); ctx.quadraticCurveTo(6, -16, 13, -8);
+    ctx.quadraticCurveTo(18, 2, 0, 16); ctx.fill();
+    ctx.fillStyle = "#fff0f3";
+    for (const [sx, sy] of [[-6,0],[5,-2],[0,7],[-2,-6],[8,6]]) { ctx.beginPath(); ctx.ellipse(sx, sy, 1.6, 2.4, 0, 0, 7); ctx.fill(); }
+    ctx.fillStyle = "#7fd6a0"; rr(-9, -16, 18, 7, 3.5); ctx.fill();
+    eyes(0, 2, 17, 0, false, "#a33b58");
+    ctx.restore();
+  }
+}
+
 function drawCarrot(ct, camX, t) {
   if (ct.got) return;
   const x = ct.x - camX, y = ct.y + Math.sin(t * 2 + ct.t) * 6;
@@ -1444,6 +1615,30 @@ function drawDumplingHero(cx, footY, scale, t, opts) {
 
 function drawPlayer(camX, t) {
   if (player.iframes > 0 && Math.floor(player.iframes * 22) % 2 === 0) return;
+  if (player.star > 0) {
+    // rainbow shimmer, and it blinks faster as the star runs out
+    const fading = player.star < 2 && Math.floor(player.star * 9) % 2 === 0;
+    ctx.save();
+    ctx.globalAlpha = fading ? 0.45 : 1;
+    const glow = ctx.createRadialGradient(
+      player.x + player.w/2 - camX, player.y + player.h/2, 6,
+      player.x + player.w/2 - camX, player.y + player.h/2, 46);
+    glow.addColorStop(0, "rgba(255,246,178,.6)"); glow.addColorStop(1, "rgba(255,246,178,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(player.x + player.w/2 - camX, player.y + player.h/2, 46, 0, 7); ctx.fill();
+    drawDumplingHero(player.x + player.w/2 - camX, player.y + player.h, 1, t, {
+      run: player.anim, air: player.onGround ? 0 : 1, squash: player.squash, face: player.face });
+    // a cycling rainbow rim rather than a wash, so the face still reads
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = fading ? 0.4 : 0.85;
+    ctx.strokeStyle = RAINBOW_COLS[Math.floor(t * 14) % RAINBOW_COLS.length];
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.ellipse(player.x + player.w/2 - camX, player.y + player.h/2 - 3, 25, 26, 0, 0, 7);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
   drawDumplingHero(player.x + player.w/2 - camX, player.y + player.h, 1, t, {
     run: player.anim, air: player.onGround ? 0 : 1, squash: player.squash, face: player.face
   });
@@ -1740,7 +1935,11 @@ function renderPlay(t) {
   for (const hz of world.hazards) if (hz.x > camX - 60 && hz.x < camX + W + 60) drawHazard(hz, camX, t);
   drawCoins(camX, t);
   for (const rg of world.rings) if (rg.x > camX - 60 && rg.x < camX + W + 60) drawRing(rg, camX);
-  for (const ct of world.carrots) if (ct.x > camX - 90 && ct.x < camX + W + 90) drawCarrot(ct, camX, t);
+  for (const m of world.movers) if (m.x > camX - 80 && m.x < camX + W + 80) drawMover(m, camX, t);
+  for (const pk of world.pickups) {
+    if (pk.got || pk.x < camX - 90 || pk.x > camX + W + 90) continue;
+    pk.kind === "star" ? drawStar(pk, camX, t) : drawCarrot(pk, camX, t);
+  }
   for (const e of world.enemies) if (e.x > camX - 80 && e.x < camX + W + 80) drawEnemy(e, camX, t);
   drawCompanion(camX, t);
   drawPlayer(camX, t);
@@ -1857,7 +2056,7 @@ function menuHub() {
   const up = egg.upgrade;
   return `
     <h1>Squishy Escape</h1>
-    <p class="sub">by Annie Smith, Ash Smith &amp; Computer Smith</p>
+    <p class="sub">by Annie Smith &amp; Ash Smith <span class="ver">v${VERSION}</span></p>
     <div class="stats">
       <div class="stat money">🪙<b>${money()}</b>Dumpleningness</div>
       <div class="stat egg">🥚<b>${egg.name}</b>your egg</div>
@@ -1885,7 +2084,10 @@ function menuHelp() {
     <div class="tradeRow"><span>Land on a 6 or a 7</span><span>squash it, +5 🪙<br>and your double bounce comes back</span></div>
     <div class="tradeRow"><span>Dumplings, strawberries, paws,<br>bananas, butter, fidget rings</span><span>ouch — costs a 💗</span></div>
     <div class="tradeRow"><span>The pink wall</span><span>ends the run instantly</span></div>
+    <div class="tradeRow"><span>⭐ The glowing star</span><span>invincible for 8 seconds —<br>run straight through everything</span></div>
     <div class="tradeRow"><span>🥕 The glowing carrot</span><span>launches you onto a rainbow!<br>hold jump to fly up, let go to drop</span></div>
+    <div class="tradeRow"><span>Grab over half the<br>rainbow coins</span><span>you get a heart back (up to 5)</span></div>
+    <div class="tradeRow"><span>Watch out</span><span>dumplings drop from above,<br>cheese wheels roll at you,<br>strawberries bounce</span></div>
     <div class="tradeRow"><span>P or Esc</span><span>pause</span></div>
     <div class="tradeRow"><span>M</span><span>mute / unmute</span></div>
     <div class="tradeRow"><span>The music</span><span>speeds up and turns minor-key<br>the further out you get</span></div>
@@ -2112,7 +2314,7 @@ function frame(now) {
 
 /* poke at the game from the browser console: __SE.save, __SE.player, etc. */
 window.__SE = { game, save, player, run, world, startRun, goHub, beginHatch, persist, MUSIC, SECTIONS,
-                rainbowY, startRainbow, endRainbow,
+                rainbowY, startRainbow, endRainbow, buildChunk, resetWorld, grabStar, VERSION,
                 SQUISHIES, EGGS, TEMPLATES, grant, input, reset(){ localStorage.removeItem(SAVE_KEY); location.reload(); } };
 
 /* first boot: the common egg from the spec, free, hatching on its own */
@@ -2120,7 +2322,7 @@ resetWorld();
 if (!save.seenIntro) {
   save.seenIntro = true; persist();
   showMenu(`<h1>Squishy Escape</h1>
-    <p class="sub">by Annie Smith, Ash Smith &amp; Computer Smith</p>
+    <p class="sub">by Annie Smith &amp; Ash Smith</p>
     <div style="font-size:clamp(12px,2.1vmin,18px);font-weight:700;line-height:1.55;margin:.4em 0 1em">
       There's an egg here. A <b>Common Egg</b>.<br>
       Inside is your very first squishy.<br><br>

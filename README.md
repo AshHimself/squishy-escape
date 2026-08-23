@@ -1,6 +1,6 @@
 # Squishy Escape
 
-A 2D side-scroller by **Annie Smith, Ash Smith & Computer Smith**.
+A 2D side-scroller by **Annie Smith & Ash Smith**.
 
 <p align="center">
   <a href="https://ashhimself.github.io/squishy-escape/">
@@ -30,6 +30,7 @@ and on an iPad (on-screen buttons appear the moment you touch the screen).
 | Space again in mid-air | **double bounce** — a second jump, slightly smaller |
 | Land on a 6 or a 7 | squash it for coins, and your double bounce comes back |
 | Hold jump on the rainbow | fly up — let go to drop |
+| ⭐ Star | invincible for 8.5 seconds |
 | P or Esc | pause |
 | M | mute |
 
@@ -40,6 +41,18 @@ pit. The **squish wall** ends the run instantly — that's the one that matters.
 ground and each one pays more: 5, then 10, then 15, then 20. This is the single
 best way to get rich — and because squashing a 6-7 gives your double bounce
 back, a good chain can keep you in the air a very long time.
+
+## ⭐ The star
+
+A **glowing star** turns up every ten course pieces or so. Grab it and you're
+**invincible for eight and a half seconds**, exactly like the star in Super
+Mario Bros: run straight through snacks, fidget rings and falling dumplings,
+and any 6-7 you touch just pops for coins — you don't even have to land on it.
+The dumpling glows with a cycling rainbow rim and the music switches to a fast
+168bpm section. The rim blinks when you have about two seconds left.
+
+The one thing the star does *not* save you from is the squish wall. That still
+ends the run, so keep moving.
 
 ## 🥕 The magical carrot
 
@@ -57,9 +70,15 @@ the whole time, so a carrot is worth about 85m of free distance on top of the
 coins. When the rainbow runs out you float gently back down onto the course and
 the run carries on.
 
-Carrots turn up roughly once every eight course pieces, and never two close
-together — it should feel like a lucky find. `CARROT_COIN`, `RAINBOW_TIME` and
-`RAINBOW_SPEED` at the top of the file tune how generous it is.
+**Grab more than half the coins on the rainbow and you get a heart back**, up to
+a maximum of five. That is the only way to heal, so a good ride is worth real
+survival, not just money.
+
+Special pickups appear roughly every five course pieces, never two close
+together, and about 60% of them are stars — so carrots work out at roughly one
+every seventeen pieces and stay a lucky find. `CARROT_COIN`, `RAINBOW_TIME`,
+`RAINBOW_SPEED`, `STAR_TIME` and `MAX_HEARTS` at the top of the file tune all
+of it.
 
 ## The music
 
@@ -99,7 +118,15 @@ of course: **12 rows of exactly 16 characters**.
  .  nothing            #  ground block      C  cheese block (solid)
  o  coin               D  dumpling          S  strawberry
  P  paw                N  banana            B  butter
+ ?  a RANDOM one of the five snacks above -- different every run
  R  fidget ring (floats and bobs)           6 / 7  the enemies
+
+ F  falling dumpling -- hangs in the air, drops when you walk under it, then
+    re-arms in place a couple of seconds later. Put it in an empty row near
+    the top; it needs clear air beneath it to fall through.
+ W  rolling cheese wheel -- rolls left until it hits a wall or a ledge, then
+    starts again from where it was placed.
+ Z  bouncing strawberry -- bounces about two and a half tiles, forever.
 ```
 
 Magical carrots aren't placed by hand — the game drops them into suitable
@@ -146,3 +173,14 @@ __SE.reset()                  // wipe the save and start over
 
 Progress is saved in the browser on that device, so each computer has its own
 collection.
+
+## Versions
+
+The version is shown on the main menu, under the title.
+
+- **v1.3.0** — the star (invincibility), falling dumplings, rolling cheese
+  wheels, bouncing strawberries, randomised snacks, a heart back for a good
+  rainbow ride, fewer 6-7s, rarer carrots.
+- **v1.2.0** — the magical carrot and the rainbow ride.
+- **v1.1.0** — double bounce, 8-bit soundtrack, on-screen controls.
+- **v1.0.0** — the game.
