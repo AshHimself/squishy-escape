@@ -163,7 +163,7 @@
 "use strict";
 
 /* ------------------------------ constants ------------------------------ */
-const VERSION = "1.4.1";           // major.minor.patch -- bump minor for features
+const VERSION = "1.5.0";           // major.minor.patch -- bump minor for features
 
 const W = 960, H = 540;            // virtual resolution
 const TILE = 45;                   // tile size
@@ -211,6 +211,8 @@ const SLIDE_MAX   = 540;
    than its middle, so without this you wedge against the next column of a
    hill and stop dead. */
 const STEP_UP     = 24;
+/* brick blocks you can smash open from underneath */
+const BRICK_HITS  = 3;
 /* wooden platforms that give way */
 const WOOD_SHAKE  = 0.5;   // warning wobble before it drops
 const WOOD_BACK   = 3.2;   // and how long until it rebuilds itself
@@ -255,8 +257,9 @@ const S = {
   stomp: () => sfx(260, 0.13, "sawtooth", 0.055, -170),
   hurt:  () => sfx(300, 0.28, "sawtooth", 0.07, -220),
   click: () => sfx(600, 0.05, "sine", 0.04),
+  brickHit:  () => sfx(300, 0.07, "square", 0.05, -80),
+  brickBreak:() => { sfx(210, 0.16, "sawtooth", 0.06, -110); setTimeout(() => sfx(340, 0.12, "square", 0.05, -160), 40); },
   creak: () => sfx(160, 0.22, "sawtooth", 0.045, -50),
-  splash:() => { sfx(520, 0.18, "sine", 0.06, -300); setTimeout(() => sfx(300, 0.22, "sine", 0.05, -180), 60); },
   slide: () => sfx(240, 0.3, "sawtooth", 0.035, 180),
   star:  () => [0, 60, 120, 180].forEach((d, i) =>
     setTimeout(() => sfx([784, 988, 1175, 1568][i], 0.22, "square", 0.07), d)),
@@ -646,18 +649,38 @@ const TEMPLATES = [
 "................","................","................","................",
 "................","................","......ooo.......","......>##<......",
 ".....>####<.....","....>######<....","...>########<...","################"]},
-{ tier:2, rows:[  // pond crossing on wooden planks
+{ tier:2, rows:[  // plank crossing over a long drop
 "................","................","................","................",
 "................","................","................","................",
-"......ooo.......","...==..==..==...","...~~~~~~~~~~...","###~~~~~~~~~~###"]},
+"......ooo.......","...==..==..==...","................","###..........###"]},
 { tier:2, rows:[  // a wooden walkway over a long drop
 "................","................","................","................",
 "................","................","................","................",
 ".....ooo........","................","....==...==.....","####.......#####"]},
-{ tier:3, rows:[  // piranha pond
+{ tier:3, rows:[  // planks, with bricks to smash overhead
 "................","................","................","................",
-"................","................","................","....o.....o.....",
-"................","..==...==...==..","..~f~~~~f~~~~f..","##~~~~~~~~~~~~##"]},
+"................","..ooo..ooo......","..XXX..XXX......","................",
+"................","..==...==.......","................","##..........####"]},
+{ tier:1, rows:[  // carrot tower -- climb for it
+"................","................","................",".........!......",
+"................","........###.....","................",".....###........",
+"................","..###...........","................","################"]},
+{ tier:2, rows:[  // carrot behind a brick lid
+"................","................",".........!......","........XXX.....",
+"................","........###.....","................",".....###........",
+"................","..###...........","................","################"]},
+{ tier:2, rows:[  // brick shelf -- smash it, or stand on it for the coins
+"................","................","................","................",
+"................","................",".......ooo......","................",
+".....XXXXX......","................",".....o...o......","################"]},
+{ tier:3, rows:[  // high carrot, with company underneath
+"................","................","................","..........!.....",
+"................",".........###....","................","......###.......",
+"................","...###..........","...6.......7....","################"]},
+{ tier:3, rows:[  // sprint
+"................","................","................","................",
+"................","................","................","................",
+"...o.o.o.o.o.o..","................",".......Z........","################"]},
 { tier:3, rows:[  // a proper hill -- slide the whole way down
 "................","................","................","................",
 "................",".......ooo......","......>##<......",".....>####<.....",
@@ -668,14 +691,15 @@ const TEMPLATES = [
 const world = {
   tiles: new Map(),   // chunk index -> array of 12 strings (solids only)
   built: -1,          // highest chunk index generated so far
-  coins: [], hazards: [], enemies: [], rings: [], parts: [], texts: [], pickups: [], movers: [], lastPickup: -99
+  coins: [], hazards: [], enemies: [], rings: [], parts: [], texts: [], pickups: [], movers: [], lastPickup: -99, lastCarrot: -99
 };
 
 function resetWorld() {
   world.tiles.clear(); world.built = -1;
   world.coins.length = world.hazards.length = 0;
   world.enemies.length = world.rings.length = world.parts.length = world.texts.length = 0;
-  world.pickups.length = 0; world.movers.length = 0; world.lastPickup = -99;
+  world.pickups.length = 0; world.movers.length = 0;
+  world.lastPickup = -99; world.lastCarrot = -99;
   for (let i = 0; i <= 3; i++) buildChunk(i);
 }
 
@@ -703,10 +727,10 @@ function buildChunk(index) {
         case "o": world.coins.push({ x:wx + TILE/2, y:wy + TILE/2, got:false, t:Math.random()*6 }); break;
         case "D": case "S": case "P": case "N": case "B":
           world.hazards.push({ x:wx + TILE/2, y:wy + TILE - 17, kind:ch, t:Math.random()*6 }); break;
+        case "X": world.movers.push({ kind:"X", ci:index, row:r, col:c,
+                    x:wx + TILE/2, y:wy + TILE/2, hits:0, shake:0 }); break;
         case "=": world.movers.push({ kind:"P", ci:index, row:r, col:c,
                     x:wx + TILE/2, y:wy + TILE/2, state:"solid", timer:0, fy:0, vy:0 }); break;
-        case "f": world.movers.push({ kind:"f", x:wx + TILE/2, y0:wy + TILE/2, y:wy + TILE/2,
-                    vy:0, state:"swim", timer:0.6 + Math.random() * 2.2, t:Math.random()*6 }); break;
         case "?": world.hazards.push({ x:wx + TILE/2, y:wy + TILE - 17,
                     kind:"DSPNB"[(Math.random()*5)|0], t:Math.random()*6 }); break;
         case "F": world.movers.push({ kind:"F", x:wx + TILE/2, y0:wy + TILE/2, y:wy + TILE/2,
@@ -715,18 +739,26 @@ function buildChunk(index) {
                     vx:-118, rot:0, state:"roll", timer:0, t:0 }); break;
         case "Z": world.movers.push({ kind:"Z", x:wx + TILE/2, y0:wy + TILE - 17, y:wy + TILE - 17,
                     phase:Math.random()*3, t:0 }); break;
+        case "!":
+          // a carrot, but only if we haven't handed one out recently
+          if (index - world.lastCarrot >= 6) {
+            world.pickups.push({ x:wx + TILE/2, y:wy + TILE/2, kind:"carrot", got:false, t:Math.random()*6 });
+            world.lastCarrot = index;
+          }
+          break;
         case "R": world.rings.push({ x:wx + TILE/2, y:wy + TILE/2, base:wy + TILE/2, a:Math.random()*6.28 }); break;
         case "6": world.enemies.push(makeEnemy(wx + TILE/2, wy + TILE, "6")); break;
         case "7": world.enemies.push(makeEnemy(wx + TILE/2, wy + TILE, "7")); break;
       }
-      line += "#C=><~".indexOf(ch) >= 0 ? ch : (ch === "f" ? "~" : ".");
+      line += "#C=><X".indexOf(ch) >= 0 ? ch : ".";
     }
     solid.push(line);
   }
   /* Every so often, tuck a special pickup somewhere jumpable. Never two close
      together -- it should feel like a lucky find, not a pickup line.
-     Most of them are stars; the carrot is the rarer treat. */
-  if (index >= 3 && index - world.lastPickup >= 5 && Math.random() < 0.5) {
+     Carrots aren't placed here -- they only appear on the "!" markers that the
+     course pieces put up high, so you have to climb for them. */
+  if (index >= 3 && index - world.lastPickup >= 7 && Math.random() < 0.3) {
     const spots = [];
     for (let c = 2; c < COLS - 2; c++) {
       if (solid[ROWS - 1][c] === "#" && solid[8][c] === "." && solid[7][c] === "." && solid[9][c] === ".") spots.push(c);
@@ -734,7 +766,7 @@ function buildChunk(index) {
     if (spots.length) {
       const c = spots[(Math.random() * spots.length) | 0];
       world.pickups.push({ x: index * CHUNK_W + c * TILE + TILE/2, y: 8 * TILE + TILE/2,
-                           kind: Math.random() < 0.6 ? "star" : "carrot", got: false, t: Math.random() * 6 });
+                           kind: "star", got: false, t: Math.random() * 6 });
       world.lastPickup = index;
     }
   }
@@ -763,8 +795,10 @@ function tileAtPx(px, py) {
   if (!t) return ".";
   return t[row][col - ci * COLS] || ".";
 }
-const isSolidPx = (px, py) => { const c = tileAtPx(px, py); return c === "#" || c === "C" || c === "="; };
-const isWaterPx = (px, py) => tileAtPx(px, py) === "~";
+const isSolidPx = (px, py) => {
+  const c = tileAtPx(px, py);
+  return c === "#" || c === "C" || c === "=" || c === "X";
+};
 
 /* Slopes are single 45-degree tiles. ">" climbs to the right, "<" drops to the
    right. This gives the height of the slope surface at a given world x, plus
@@ -910,6 +944,30 @@ function endRun(cause) {
   persist();
 }
 
+/* Head-butting a brick from below cracks it; three goes and it bursts, leaving
+   a hole you can jump straight through. */
+function bumpBrick(px, py) {
+  if (tileAtPx(px, py) !== "X") return false;
+  const col = Math.floor(px / TILE), row = Math.floor(py / TILE);
+  const ci = Math.floor(col / COLS), lc = col - ci * COLS;
+  const m = world.movers.find(v => v.kind === "X" && v.ci === ci && v.row === row && v.col === lc);
+  if (!m || m.hits >= BRICK_HITS) return false;
+  m.hits++; m.shake = 0.2;
+  game.shake = Math.max(game.shake, 3);
+  if (m.hits >= BRICK_HITS) {
+    setTile(ci, row, lc, ".");
+    burst(m.x, m.y, "#c9925a", 22, 280);
+    burst(m.x, m.y, "#e8bd86", 12, 200);
+    S.brickBreak(); game.shake = 7;
+    run.money += 2;
+    floatText(m.x, m.y - 14, "+2", "#e8bd86");
+  } else {
+    burst(m.x, m.y - 12, "#d8a56a", 7, 150);
+    S.brickHit();
+  }
+  return true;
+}
+
 function grabStar(cx, cy) {
   player.star = STAR_TIME;
   game.shake = 10;
@@ -955,7 +1013,7 @@ function respawnFromPit() {
   let col = Math.floor(player.x / TILE);
   for (let i = 0; i < 200; i++) {
     const px = (col + i) * TILE + TILE/2;
-    if (isSolidPx(px, (ROWS - 1) * TILE + 4) && !isWaterPx(px, (ROWS - 1) * TILE + 4)) {
+    if (isSolidPx(px, (ROWS - 1) * TILE + 4)) {
       player.x = px - player.w/2;
       player.y = (ROWS - 1) * TILE - player.h - 90;
       player.vx = 0; player.vy = 0;
@@ -1131,6 +1189,11 @@ function updatePlay(dt) {
     player.prevY = player.y;
     const hit = moveBody(player, dt);
     player.slopeDir = hit.slope || 0;
+    if (hit.ceil) {
+      const hy = player.y - 5;
+      bumpBrick(player.x + 5, hy) || bumpBrick(player.x + player.w/2, hy) ||
+        bumpBrick(player.x + player.w - 5, hy);
+    }
     if (hit.ground) {
       if (!player.onGround) { player.squash = 0.45; S.land(); }
       player.onGround = true; player.coyote = COYOTE; player.combo = 0; player.airJumps = 1;
@@ -1140,12 +1203,6 @@ function updatePlay(dt) {
     }
     if (player.x < run.wallX - 200) player.x = run.wallX - 200;
     if (player.y > H + 120) respawnFromPit();
-    // a dunking costs a heart, same as a pit
-    if (player.star <= 0 && isWaterPx(player.x + player.w/2, player.y + player.h - 6)) {
-      burst(player.x + player.w/2, player.y + player.h, "#9fd8ff", 18, 240);
-      S.splash();
-      respawnFromPit();
-    }
 
     player.iframes = Math.max(0, player.iframes - dt);
     if (player.star > 0) {
@@ -1271,6 +1328,8 @@ function updatePlay(dt) {
         m.timer -= dt;
         if (m.timer <= 0) { m.state = "hang"; m.y = m.y0; m.vy = 0; }
       }
+    } else if (m.kind === "X") {
+      if (m.shake > 0) m.shake = Math.max(0, m.shake - dt);
     } else if (m.kind === "W") {
       if (m.state === "roll") {
         m.x += m.vx * dt; m.rot += m.vx * dt * 0.055;
@@ -1306,26 +1365,15 @@ function updatePlay(dt) {
           m.state = "solid"; m.fy = 0; m.vy = 0;
         }
       }
-    } else if (m.kind === "f") {
-      // piranha: lurks in the water, leaps at whatever is above it
-      m.timer -= dt;
-      if (m.state === "swim") {
-        m.y = m.y0 + Math.sin(m.t * 2.2) * 5;
-        if (m.timer <= 0) { m.state = "leap"; m.vy = -640 - Math.random() * 130; }
-      } else {
-        m.vy += 1700 * dt; m.y += m.vy * dt;
-        if (m.y >= m.y0) { m.y = m.y0; m.state = "swim"; m.timer = 1.3 + Math.random() * 1.8; m.vy = 0; }
-      }
     } else if (m.kind === "Z") {
       m.phase += dt * 2.5;
       m.y = m.y0 - Math.abs(Math.sin(m.phase)) * 118;
     }
     if (run.over || player.star > 0) continue;
-    if (m.kind === "P") continue;                       // platforms are scenery, not spikes
+    if (m.kind === "P" || m.kind === "X") continue;     // terrain, not spikes
     const gone = (m.kind === "F" || m.kind === "W") && m.state === "gone";
-    const hy = m.kind === "f" ? 24 : 27;
     if (!gone && Math.abs((player.x + player.w/2) - m.x) < 25 &&
-        Math.abs((player.y + player.h/2) - m.y) < hy) hurt();
+        Math.abs((player.y + player.h/2) - m.y) < 27) hurt();
   }
 
   for (const pk of world.pickups) {
@@ -1488,34 +1536,11 @@ function drawTiles(camX) {
     for (let row = 0; row < ROWS; row++) {
       const px = col * TILE, py = row * TILE;
       const ch = tileAtPx(px + 2, py + 2);
-      if ("#C=><~".indexOf(ch) < 0) continue;
+      if ("#C=><X".indexOf(ch) < 0) continue;
       // a tile is only "open" (and gets the bright top cap) when nothing sits on
       // it -- a ramp counts as sitting on it, otherwise hills look like stairs
       const above = tileAtPx(px + 2, py - 4);
       const x = px - camX, open = !isSolidPx(px + 2, py - 4) && above !== ">" && above !== "<";
-      if (ch === "~") {
-        // water: a translucent body with a moving surface line
-        const surface = !isWaterPx(px + 2, py - 4);
-        ctx.fillStyle = "rgba(96,176,232,.62)";
-        ctx.fillRect(x, py, TILE, TILE + 1);
-        ctx.fillStyle = "rgba(150,214,250,.35)";
-        ctx.fillRect(x, py, TILE, TILE * 0.5);
-        if (surface) {
-          ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 3;
-          ctx.beginPath();
-          for (let sx = 0; sx <= TILE; sx += 6) {
-            const sy = py + 4 + Math.sin((px + sx) * 0.06 + game.t * 3.2) * 3;
-            sx === 0 ? ctx.moveTo(x + sx, sy) : ctx.lineTo(x + sx, sy);
-          }
-          ctx.stroke();
-        }
-        ctx.fillStyle = "rgba(255,255,255,.22)";
-        for (let b = 0; b < 2; b++) {
-          const bx = x + 10 + b * 22, by = py + mod(TILE - (game.t * 22 + b * 30 + px), TILE);
-          ctx.beginPath(); ctx.arc(bx, by, 2.4, 0, 7); ctx.fill();
-        }
-        continue;
-      }
       if (ch === ">" || ch === "<") {
         // a 45-degree ramp
         ctx.fillStyle = "#63c79c";
@@ -1528,6 +1553,13 @@ function drawTiles(camX) {
         if (ch === ">") { ctx.moveTo(x + 2, py + TILE - 1); ctx.lineTo(x + TILE - 2, py + 3); }
         else            { ctx.moveTo(x + 2, py + 3); ctx.lineTo(x + TILE - 2, py + TILE - 1); }
         ctx.stroke();
+        continue;
+      }
+      if (ch === "X") {
+        const m = world.movers.find(v => v.kind === "X" && Math.abs(v.x - (px + TILE/2)) < 2 &&
+                                         Math.abs(v.y - (py + TILE/2)) < 2);
+        const jolt = (m && m.shake > 0) ? Math.sin(game.t * 70) * 3 * (m.shake / 0.2) : 0;
+        drawBrick(x, py + jolt, m ? m.hits : 0);
         continue;
       }
       if (ch === "=") {
@@ -1555,6 +1587,38 @@ function drawTiles(camX) {
           ctx.beginPath(); ctx.ellipse(x + 12, py + 5, 7, 2.6, 0, 0, 7); ctx.fill();
         }
       }
+    }
+  }
+}
+
+/* A brick block. It picks up more cracks with every whack until it bursts. */
+function drawBrick(x, y, hits) {
+  ctx.fillStyle = "#b9773f"; rr(x, y, TILE, TILE, 5); ctx.fill();
+  ctx.fillStyle = "#d1904f";
+  const bh = TILE / 3;
+  for (let r = 0; r < 3; r++) {
+    const off = r % 2 ? TILE / 4 : 0;
+    for (let c = -1; c < 3; c++) {
+      const bx = x + off + c * (TILE / 2), bw = TILE / 2 - 3;
+      const cx0 = Math.max(x + 1.5, bx), cx1 = Math.min(x + TILE - 1.5, bx + bw);
+      if (cx1 > cx0) { ctx.fillRect(cx0, y + r * bh + 1.5, cx1 - cx0, bh - 3); }
+    }
+  }
+  ctx.fillStyle = "rgba(255,255,255,.3)"; ctx.fillRect(x + 2, y + 2, TILE - 4, 3);
+  if (hits > 0) {
+    ctx.strokeStyle = "rgba(60,34,14,.75)"; ctx.lineWidth = 2; ctx.lineCap = "round";
+    const cracks = [
+      [[0.5, 0.0], [0.42, 0.35], [0.6, 0.6], [0.5, 1.0]],
+      [[0.0, 0.45], [0.3, 0.5], [0.45, 0.3]],
+      [[1.0, 0.35], [0.7, 0.55], [0.62, 0.85]]
+    ];
+    for (let i = 0; i < Math.min(hits, cracks.length); i++) {
+      ctx.beginPath();
+      cracks[i].forEach((pt, j) => {
+        const px2 = x + pt[0] * TILE, py2 = y + pt[1] * TILE;
+        j ? ctx.lineTo(px2, py2) : ctx.moveTo(px2, py2);
+      });
+      ctx.stroke();
     }
   }
 }
@@ -1648,6 +1712,7 @@ function drawStar(pk, camX, t) {
 function drawMover(m, camX, t) {
   const x = m.x - camX, gone = (m.kind === "F" || m.kind === "W") && m.state === "gone";
   if (gone) return;
+  if (m.kind === "X") return;   // bricks are drawn as terrain, in drawTiles
   if (m.kind === "P") {
     // only draw the plank here once it has broken away and is tumbling
     if (m.state === "fall" && m.fy < H) {
@@ -1656,31 +1721,6 @@ function drawMover(m, camX, t) {
       drawPlank(-TILE/2, 0);
       ctx.restore(); ctx.globalAlpha = 1;
     }
-    return;
-  }
-  if (m.kind === "f") {
-    const up = m.state === "leap";
-    ctx.save(); ctx.translate(x, m.y);
-    ctx.rotate(up ? Math.max(-0.8, Math.min(0.8, m.vy / 700)) : Math.sin(t * 3 + m.t) * 0.12);
-    ctx.fillStyle = "#c94f7a";
-    ctx.beginPath();
-    ctx.moveTo(16, 0); ctx.quadraticCurveTo(2, -13, -12, 0);
-    ctx.quadraticCurveTo(2, 13, 16, 0); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(-21, -9); ctx.lineTo(-21, 9); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = "#e8759c";
-    ctx.beginPath(); ctx.ellipse(0, 2, 9, 5, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = "#fff";
-    ctx.beginPath(); ctx.arc(8, -3, 3.4, 0, 7); ctx.fill();
-    ctx.fillStyle = "#3a2030";
-    ctx.beginPath(); ctx.arc(9, -3, 1.8, 0, 7); ctx.fill();
-    // teeth
-    ctx.fillStyle = "#fff";
-    for (let i = 0; i < 3; i++) {
-      ctx.beginPath();
-      ctx.moveTo(15 - i * 4, 1); ctx.lineTo(13 - i * 4, 5); ctx.lineTo(11.5 - i * 4, 1);
-      ctx.closePath(); ctx.fill();
-    }
-    ctx.restore();
     return;
   }
   if (m.kind === "F") {
@@ -1707,7 +1747,7 @@ function drawMover(m, camX, t) {
     ctx.strokeStyle = "#c98f28"; ctx.lineWidth = 2.4;
     ctx.beginPath(); ctx.arc(0, 0, 19, 0, 7); ctx.stroke();
     ctx.restore();
-  } else {
+  } else if (m.kind === "Z") {
     // bouncing strawberry
     const squash = Math.abs(Math.sin(m.phase)) < 0.12 ? 0.28 : 0;
     ctx.fillStyle = "rgba(60,45,75,.13)";
@@ -2382,7 +2422,8 @@ function menuHelp() {
     <div class="tradeRow"><span>Grab over half the<br>rainbow coins</span><span>you get a heart back (up to 5)</span></div>
     <div class="tradeRow"><span>⬇️ or S on a slope</span><span>slide down with your arms up!</span></div>
     <div class="tradeRow"><span>Wooden planks</span><span>they wobble, then give way —<br>keep moving, they rebuild</span></div>
-    <div class="tradeRow"><span>Water</span><span>costs a heart, and there are<br>piranhas in there</span></div>
+    <div class="tradeRow"><span>Brick blocks</span><span>headbutt them from below —<br>three whacks and they burst open</span></div>
+    <div class="tradeRow"><span>🥕 Carrots</span><span>always up high now —<br>climb the platforms to reach them</span></div>
     <div class="tradeRow"><span>Watch out</span><span>dumplings drop from above,<br>cheese wheels roll at you,<br>strawberries bounce</span></div>
     <div class="tradeRow"><span>P or Esc</span><span>pause</span></div>
     <div class="tradeRow"><span>M</span><span>mute / unmute</span></div>
@@ -2611,6 +2652,7 @@ function frame(now) {
 /* poke at the game from the browser console: __SE.save, __SE.player, etc. */
 window.__SE = { game, save, player, run, world, startRun, goHub, beginHatch, persist, MUSIC, SECTIONS,
                 rainbowY, startRainbow, endRainbow, buildChunk, resetWorld, grabStar, VERSION,
+                tileAtPx, isSolidPx, bumpBrick,
                 SQUISHIES, EGGS, TEMPLATES, grant, input, reset(){ localStorage.removeItem(SAVE_KEY); location.reload(); } };
 
 /* first boot: the common egg from the spec, free, hatching on its own */

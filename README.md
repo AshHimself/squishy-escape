@@ -31,6 +31,7 @@ and on an iPad (on-screen buttons appear the moment you touch the screen).
 | Land on a 6 or a 7 | squash it for coins, and your double bounce comes back |
 | Hold jump on the rainbow | fly up — let go to drop |
 | ⬇️ or S on a slope | **slide** down it, arms in the air |
+| Jump into a brick from below | crack it — 3 hits and it bursts |
 | ⭐ Star | invincible for 11 seconds |
 | P or Esc | pause |
 | M | mute |
@@ -46,7 +47,7 @@ ground and each one pays more: 5, then 10, then 15, then 20. This is the single
 best way to get rich — and because squashing a 6-7 gives your double bounce
 back, a good chain can keep you in the air a very long time.
 
-## Slopes, planks and water
+## Slopes, planks and bricks
 
 **Slopes.** Some pieces have a hill. Run straight up it — then hold **Down**
 on the way over the top and the dumpling throws both arms in the air and
@@ -59,10 +60,10 @@ then drop away about half a second later. They rebuild themselves a few seconds
 after that, so a missed jump isn't the end. The 6-7s can stand on them all day
 without breaking them — the planks only care about you.
 
-**Water and piranhas.** Ponds sit under the plank crossings. Falling in costs a
-heart and puts you back on dry land, and there are **piranhas** in there that
-leap out at whatever is passing overhead. The star makes you immune to the
-piranhas, but not to the dunking.
+**Brick blocks.** Jump up into one from below and it cracks; three hits and it
+bursts into rubble, worth a couple of coins, leaving a hole you can jump
+straight through. They're built to guard something — a carrot sits directly
+over some of them.
 
 ## ⭐ The star
 
@@ -78,8 +79,12 @@ ends the run, so keep moving.
 
 ## 🥕 The magical carrot
 
-Every so often you'll find a **glowing carrot** floating above the course. Grab
-it and the dumpling gets launched into the sky onto a **mystical rainbow**.
+Carrots no longer turn up at ground level. Every one is placed **up on a
+climb** — a little staircase of platforms, sometimes with a brick block
+sitting right underneath it that you have to punch open first. Getting one now
+takes real platforming, not just a lucky sidestep.
+
+Grab it and the dumpling gets launched into the sky onto a **mystical rainbow**.
 
 For the next nine and a half seconds you fly along the rainbow road: **hold
 jump to climb, let go to drop**. The coins sit right on the rainbow itself, so
@@ -152,9 +157,12 @@ of course: **12 rows of exactly 16 characters**.
 
  =  wooden plank -- solid until YOU stand on it, then it wobbles, drops, and
     rebuilds itself a few seconds later. Enemies don't set it off.
- ~  water -- not solid. Falling in costs a heart. Keep the far left and right
-    of the bottom row solid so pieces still join up.
- f  piranha -- put it on a water tile; it lurks and leaps.
+ X  brick block -- solid until you jump into it from below 3 times, then it
+    bursts and you can fly straight through. A good place to hide a carrot.
+ !  carrot marker -- unlike stars, carrots are ONLY placed here, never
+    scattered automatically. Put it up on a climb, a few rows above a
+    platform, so reaching it takes real jumping. Two per template max, or
+    they stop feeling special.
  >  ramp climbing to the right     <  ramp dropping to the right
     Ramps are 45 degrees and one tile each, so a hill is a diagonal staircase
     of them. Every ramp needs a solid tile directly underneath it, or the
@@ -193,7 +201,7 @@ Three rules so the course stays possible:
   `RUN_ACCEL` sets how quickly it gets up to speed, `SPRINT_RUN` how fast the
   wind-up sprint goes, and `SLIDE_ACCEL` / `SLIDE_MAX` how fierce a slope
   slide is. `WOOD_SHAKE` and `WOOD_BACK` are the plank's warning wobble and
-  how long it takes to rebuild.
+  how long it takes to rebuild. `BRICK_HITS` is how many headbutts a brick takes to burst.
 - `SECTIONS` — the music. Each entry is 16 sixteenth-notes: `lead` is a list of
   MIDI note numbers (`null` is a rest), `roots` is the bassline's four chords,
   and `kick` / `snare` / `hat` are patterns where `x` is a hit and `.` is a rest.
@@ -216,6 +224,8 @@ collection.
 
 The version is shown on the main menu, under the title.
 
+- **v1.5.0** — water and piranhas removed; destructible brick blocks (3 hits
+  to burst); carrots now only spawn up on a climb, never at ground level.
 - **v1.4.1** — you can actually walk up the hills now, not just slide down them.
 - **v1.4.0** — slopes you can slide down with your arms in the air, wooden
   planks that give way under you (but not under enemies), water with piranhas,
