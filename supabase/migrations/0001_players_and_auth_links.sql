@@ -2,7 +2,7 @@
 -- anonymous session uid so a player can "pick up" their profile on a new
 -- device by re-entering nickname + PIN.
 
-create extension if not exists pgcrypto;
+create extension if not exists pgcrypto with schema extensions;
 
 create table players (
   id            uuid primary key default gen_random_uuid(),

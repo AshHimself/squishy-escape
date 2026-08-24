@@ -2982,6 +2982,15 @@ async function mpEnterRoom(action) {
     mp.unwatchRoom = MP.watchRoom(mp.sessionId, { playerId: mp.playerId, nickname: mp.nickname }, {
       onPresence: players => { mp.roster = players; if (!mp.trade) showMenu(menuLobby()); },
       onBroadcast: payload => {
+        if (payload.type === "trade_started" && payload.toPlayerId === mp.playerId && !mp.trade) {
+          // someone proposed a trade with *us* -- open the trade sheet as the recipient
+          mp.trade = { id: payload.tradeId, otherPlayerId: payload.fromPlayerId, otherNickname: payload.fromNickname,
+                        offerMine: [], offerTheirs: [], confirmedMine: false, confirmedTheirs: false, status: "negotiating" };
+          mp.myOffer = [];
+          mp.unwatchTrade = MP.watchTrade(payload.tradeId, mpOnTradeRow);
+          showMenu(menuTradeSession());
+          return;
+        }
         if (payload.type === "trade_started") mp.notice = "Someone started a trade…";
         if (payload.type === "trade_completed") mp.notice = "A trade just finished!";
         if (!mp.trade) showMenu(menuLobby());
@@ -3368,7 +3377,9 @@ sheetEl.addEventListener("click", e => {
                         offerMine: [], offerTheirs: [], confirmedMine: false, confirmedTheirs: false, status: "negotiating" };
           mp.myOffer = [];
           mp.unwatchTrade = MP.watchTrade(tradeId, mpOnTradeRow);
-          MP.broadcastTradeEvent(mp.sessionId, "trade_started", {});
+          MP.broadcastTradeEvent(mp.sessionId, "trade_started", {
+            tradeId, toPlayerId: otherPlayerId, fromPlayerId: mp.playerId, fromNickname: mp.nickname,
+          });
           showMenu(menuTradeSession());
         })
         .catch(err => { mp.busy = false; mp.error = err.message || "Something went wrong."; showMenu(menuLobby()); });

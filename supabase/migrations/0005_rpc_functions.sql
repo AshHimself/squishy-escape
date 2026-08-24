@@ -10,7 +10,7 @@ create or replace function register_player(p_nickname text, p_pin text)
 returns table(player_id uuid, nickname text)
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions  -- extensions: where Supabase installs pgcrypto (crypt/gen_salt)
 as $$
 declare
   v_uid uuid := auth.uid();
@@ -49,7 +49,7 @@ create or replace function login_player(p_nickname text, p_pin text)
 returns table(player_id uuid, nickname text)
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   v_uid uuid := auth.uid();

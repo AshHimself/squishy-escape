@@ -17,8 +17,9 @@
   // Override via ?sb=<url>&key=<anon-key> for pointing at a different
   // project (e.g. local dev) without a build step.
   const params = new URLSearchParams(location.search);
-  const SB_URL = params.get("sb") || "https://YOUR-PROJECT.supabase.co";
-  const SB_ANON_KEY = params.get("key") || "YOUR-ANON-KEY";
+  const SB_URL = params.get("sb") || "https://oaqrzjssxyqddxenzhhs.supabase.co";
+  const SB_ANON_KEY = params.get("key") ||
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hcXJ6anNzeHlxZGR4ZW56aGhzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc1NjE2NTEsImV4cCI6MjEwMzEzNzY1MX0.acB7r4YuTHU4Ixyyy0a67cAbc3g3qCiuMzh6ln1tI_Y";
 
   const ERROR_MESSAGES = {
     not_logged_in: "Something went wrong signing you in — try again.",
@@ -132,7 +133,9 @@
       .eq("session_id", sessionId)
       .is("left_at", null);
     if (error) throw new MPError((error.message || "").trim());
-    return data || [];
+    // camelCase to match the shape watchRoom's presence sync produces --
+    // menuLobby() compares roster entries against mp.playerId either way.
+    return (data || []).map((r) => ({ playerId: r.player_id, nickname: r.nickname, isHost: r.is_host }));
   }
 
   // ------------------------- presence + broadcast ---------------------------
