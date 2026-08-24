@@ -165,7 +165,7 @@
 "use strict";
 
 /* ------------------------------ constants ------------------------------ */
-const VERSION = "1.7.0";           // major.minor.patch -- bump minor for features
+const VERSION = "1.7.1";           // major.minor.patch -- bump minor for features
 
 const W = 960, H = 540;            // virtual resolution
 const TILE = 45;                   // tile size
@@ -548,9 +548,16 @@ addEventListener("keydown", e => {
   if (e.code === "KeyM") toggleMute();
   if ((e.code === "KeyP" || e.code === "Escape") && (game.state === "play" || game.state === "paused")) togglePause();
   // a little Easter egg for the menu screen -- type IDFKA
-  if (game.state === "hub" && /^Key[A-Z]$/.test(e.code)) {
-    cheatBuffer = (cheatBuffer + e.code[3]).slice(-5);
-    if (cheatBuffer === "IDFKA") { cheatBuffer = ""; activateGodMode(); }
+  // e.code (physical key position) is preferred, but falls back to e.key so
+  // this still works on virtual keyboards / IMEs where code can be unreliable
+  if (game.state === "hub") {
+    const letter = /^Key[A-Z]$/.test(e.code) ? e.code[3]
+                 : /^[a-zA-Z]$/.test(e.key)   ? e.key.toUpperCase()
+                 : null;
+    if (letter) {
+      cheatBuffer = (cheatBuffer + letter).slice(-5);
+      if (cheatBuffer === "IDFKA") { cheatBuffer = ""; activateGodMode(); }
+    }
   }
 });
 addEventListener("keyup", e => {
