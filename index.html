@@ -1068,7 +1068,18 @@ function endRun(cause) {
     if (window.MP && MP.available()) {
       MP.updateSave({ best_dist: save.bestDist, best_money: save.bestMoney, money: save.money, runs: save.runs })
         .then(() => { mp.syncNotice = null; })
-        .catch(() => { mp.syncNotice = "⚠️ Your last score didn't save online — try signing in again."; });
+        .catch(err => {
+          if (err && err.code === "not_registered") {
+            // this device's sign-in doesn't actually exist any more (e.g. it
+            // expired, or this profile got logged in from elsewhere) -- the
+            // hub was falsely claiming "signed in", so clear that and say why
+            save.cloudPlayerId = null; save.cloudNickname = null; persist();
+            mp.playerId = null; mp.nickname = null;
+            mp.syncNotice = "⚠️ You got signed out, so this run didn't save — tap Sign Up on the hub to log back in.";
+          } else {
+            mp.syncNotice = "⚠️ Your last score didn't save online — try signing in again.";
+          }
+        });
     } else {
       mp.syncNotice = "⚠️ Couldn't reach the leaderboard to save your score (you're still saved locally).";
     }
@@ -3082,7 +3093,7 @@ function menuHub() {
       !(window.MP && MP.available())
         ? `<span class="ver">👤 Offline — sign-in unavailable</span>`
         : save.cloudPlayerId
-          ? `<span class="ver" style="background:var(--mint)">👤 Signed in as ${escapeHtml(save.cloudNickname)}</span>`
+          ? `<span class="ver" style="background:var(--mint)">👤 Signed in as ${escapeHtml(save.cloudNickname)}</span> <button class="small" data-act="mpLogout">Log Out</button>`
           : `<span class="ver" style="background:var(--pink)">👤 Not signed in</span> <button class="small" data-act="multiplayer">Sign Up</button>`
     }</p>
     ${mp.syncNotice ? `<p class="sub" style="color:#c0392b;font-weight:800">${escapeHtml(mp.syncNotice)}</p>` : ""}
