@@ -165,7 +165,7 @@
 "use strict";
 
 /* ------------------------------ constants ------------------------------ */
-const VERSION = "1.7.1";           // major.minor.patch -- bump minor for features
+const VERSION = "1.8.0";           // major.minor.patch -- bump minor for features
 
 const W = 960, H = 540;            // virtual resolution
 const TILE = 45;                   // tile size
@@ -238,7 +238,8 @@ const WOOD_BACK   = 3.2;   // and how long until it rebuilds itself
 const SAVE_KEY = "squishyEscape.save.v1";
 const freshSave = () => ({
   money: 0, eggTier: 1, counts: {}, equipped: null,
-  bestDist: 0, bestMoney: 0, runs: 0, seenIntro: false, muted: false, touchUI: false
+  bestDist: 0, bestMoney: 0, runs: 0, seenIntro: false, muted: false, touchUI: false,
+  skin: "classic", accessory: null
 });
 let save = (() => {
   try {
@@ -2021,6 +2022,89 @@ function drawEnemy(e, camX, t) {
 }
 
 /* --------------------------- the hero dumpling --------------------------- */
+/* ============================== SKINS ==================================
+   Two independent equip slots: a body-colour skin, and a small accessory.
+   Neither touches the superpower equip slot (Collection screen) -- you can
+   be flying-powered while wearing any skin you like.
+   ========================================================================== */
+const CLASSIC_PALETTE = [[0.00,"#ffadd2"],[0.24,"#ffd390"],[0.48,"#a9edc4"],[0.74,"#9ecdff"],[1.00,"#c3a9ff"]];
+
+// always-available presets, unlocked from the very first launch
+const PALETTES = [
+  { id:"classic",   name:"Classic Rainbow", stops: CLASSIC_PALETTE },
+  { id:"sunset",     name:"Sunset",   stops: [[0,"#ff9a6b"],[0.35,"#ff6f91"],[0.7,"#c86bd8"],[1,"#7a5cff"]] },
+  { id:"mint",       name:"Mint Breeze", stops: [[0,"#bdf2d6"],[0.4,"#8fe3c9"],[0.75,"#7fd0e8"],[1,"#a9c8f0"]] },
+  { id:"bubblegum",  name:"Bubblegum", stops: [[0,"#ffd6ec"],[0.4,"#ff9fd0"],[0.75,"#ff7ab8"],[1,"#f0a8ff"]] },
+  { id:"lemonade",   name:"Lemonade", stops: [[0,"#fff6c2"],[0.4,"#ffe27a"],[0.75,"#ffcf6b"],[1,"#ffe8a3"]] },
+  { id:"galaxy",     name:"Galaxy Night", stops: [[0,"#6b5aa6"],[0.35,"#4b3b8f"],[0.7,"#2f2560"],[1,"#8f7ad6"]] }
+];
+
+// unlocked by general progress, not tied to any one squishy
+const ACCESSORIES = [
+  { id:"partyhat", name:"Party Hat", icon:"🎉", need: s => s.bestDist >= 200,
+    hint:"reach 200m in a single run" },
+  { id:"bandana",  name:"Bandana",   icon:"🧣", need: s => s.runs >= 5,
+    hint:"finish 5 runs" },
+  { id:"bowtie",   name:"Bow Tie",   icon:"🎀", need: s => distinctOwned() >= 5,
+    hint:"collect 5 different squishies" },
+  { id:"shades",   name:"Sunglasses", icon:"🕶️", need: s => s.bestDist >= 600,
+    hint:"reach 600m in a single run" }
+];
+
+function accessoryUnlocked(acc) { return acc.need(save); }
+
+// every owned squishy unlocks a recolor built from its own two colours
+function squishyPalette(def) {
+  if (def.rainbow) return CLASSIC_PALETTE.map(([p, c], i) =>
+    [p, i % 2 ? def.c2 : def.c1]);
+  return [[0, def.c1], [0.55, def.c2], [1, def.c1]];
+}
+
+function currentPalette() {
+  const preset = PALETTES.find(p => p.id === save.skin);
+  if (preset) return preset.stops;
+  const sq = byId(save.skin);
+  if (sq && owned(sq.id)) return squishyPalette(sq);
+  return CLASSIC_PALETTE;
+}
+
+function drawAccessory(id, w, h, scale) {
+  ctx.save();
+  if (id === "partyhat") {
+    ctx.fillStyle = "#ff9fd0"; ctx.strokeStyle = "rgba(88,66,104,.5)"; ctx.lineWidth = 1.6 * scale;
+    ctx.beginPath();
+    ctx.moveTo(-11 * scale, -h * 0.34); ctx.lineTo(11 * scale, -h * 0.34); ctx.lineTo(0, -h * 0.74);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#ffe07a"; ctx.beginPath(); ctx.arc(0, -h * 0.74, 3.2 * scale, 0, 7); ctx.fill();
+    ctx.fillStyle = "#9ecdff";
+    for (const [dx, dy] of [[-6, -0.46], [2, -0.58], [-2, -0.4]]) {
+      ctx.beginPath(); ctx.arc(dx * scale, dy * h, 1.8 * scale, 0, 7); ctx.fill();
+    }
+  } else if (id === "bandana") {
+    ctx.fillStyle = "#ff7a7a"; ctx.strokeStyle = "rgba(88,66,104,.4)"; ctx.lineWidth = 1.4 * scale;
+    ctx.beginPath(); ctx.ellipse(0, -h * 0.3, 15 * scale, 6 * scale, 0, 0, Math.PI, true); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,.6)";
+    for (const dx of [-6, 0, 6]) { ctx.beginPath(); ctx.arc(dx * scale, -h * 0.31, 1.3 * scale, 0, 7); ctx.fill(); }
+  } else if (id === "bowtie") {
+    ctx.fillStyle = "#ff6fa8"; ctx.strokeStyle = "rgba(88,66,104,.4)"; ctx.lineWidth = 1.4 * scale;
+    ctx.beginPath();
+    ctx.moveTo(-2, h * 0.16); ctx.lineTo(-11 * scale, h * 0.09); ctx.lineTo(-11 * scale, h * 0.23); ctx.closePath();
+    ctx.moveTo(2, h * 0.16); ctx.lineTo(11 * scale, h * 0.09); ctx.lineTo(11 * scale, h * 0.23); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#e0498a"; ctx.beginPath(); ctx.arc(0, h * 0.16, 2.6 * scale, 0, 7); ctx.fill();
+  } else if (id === "shades") {
+    ctx.fillStyle = "#3a2f45"; ctx.strokeStyle = "rgba(0,0,0,.3)"; ctx.lineWidth = 1.2 * scale;
+    for (const sx of [-1, 1]) {
+      ctx.beginPath(); ctx.ellipse(sx * 9 * scale, -h * 0.05, 6.4 * scale, 5 * scale, 0, 0, 7); ctx.fill(); ctx.stroke();
+    }
+    ctx.strokeStyle = "#3a2f45"; ctx.lineWidth = 1.6 * scale;
+    ctx.beginPath(); ctx.moveTo(-3 * scale, -h * 0.05); ctx.lineTo(3 * scale, -h * 0.05); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,.35)";
+    for (const sx of [-1, 1]) { ctx.beginPath(); ctx.ellipse(sx * 11 * scale, -h * 0.08, 2 * scale, 1.6 * scale, 0, 0, 7); ctx.fill(); }
+  }
+  ctx.restore();
+}
+
 function drawDumplingHero(cx, footY, scale, t, opts) {
   const o = opts || {};
   const run = o.run || 0, air = o.air || 0, sq = o.squash || 0, face = o.face || 1;
@@ -2092,11 +2176,10 @@ function drawDumplingHero(cx, footY, scale, t, opts) {
     ctx.lineTo(s * w * 0.42 + s * 9 * scale, -h * 0.02 + a * 8 * scale + 7 * scale);
     ctx.stroke();
   }
-  // body: pastel rainbow dumpling
+  // body: skinned -- opts.palette is a list of [stop, color], classic rainbow by default
+  const palette = o.palette || CLASSIC_PALETTE;
   const g = ctx.createLinearGradient(-w/2, -h/2, w/2, h/2);
-  g.addColorStop(0.00, "#ffadd2"); g.addColorStop(0.24, "#ffd390");
-  g.addColorStop(0.48, "#a9edc4"); g.addColorStop(0.74, "#9ecdff");
-  g.addColorStop(1.00, "#c3a9ff");
+  for (const [stop, color] of palette) g.addColorStop(stop, color);
   ctx.fillStyle = g;
   ctx.strokeStyle = "rgba(88,66,104,.5)"; ctx.lineWidth = 2.6 * scale;
   ctx.beginPath(); ctx.ellipse(0, 0, w * 0.5, h * 0.48, 0, 0, 7); ctx.fill(); ctx.stroke();
@@ -2117,13 +2200,15 @@ function drawDumplingHero(cx, footY, scale, t, opts) {
   blush(0, -h * 0.04, 17 * scale);
   ctx.strokeStyle = "#4a3f55"; ctx.lineWidth = 2 * scale; ctx.lineCap = "round";
   ctx.beginPath(); ctx.arc(2 * scale, h * 0.1, 5 * scale, 0.15, Math.PI - 0.45); ctx.stroke();
+  if (o.accessory) drawAccessory(o.accessory, w, h, scale);
   ctx.restore();
 }
 
 function drawPlayer(camX, t) {
   if (player.iframes > 0 && Math.floor(player.iframes * 22) % 2 === 0) return;
   const powerScale = player.power === "big" ? POWER_BIG_SCALE : 1;
-  const powerOpts = { cape: player.power === "fly", flying: player.flying };
+  const powerOpts = { cape: player.power === "fly", flying: player.flying,
+                       palette: currentPalette(), accessory: save.accessory };
   if (player.flying) {
     // a little updraft of sparkle so flight reads even mid-frame
     ctx.save(); ctx.globalAlpha = 0.5;
@@ -2494,7 +2579,8 @@ function renderRainbow(t) {
   ctx.translate(px, R.ry);
   ctx.rotate(Math.max(-0.5, Math.min(0.5, R.vy / 900)));
   ctx.translate(-px, -R.ry);
-  drawDumplingHero(px, R.ry + 26, 1.05, t, { run: player.anim, air: 1, squash: 0, face: 1 });
+  drawDumplingHero(px, R.ry + 26, 1.05, t, { run: player.anim, air: 1, squash: 0, face: 1,
+    palette: currentPalette(), accessory: save.accessory });
   ctx.restore();
 
   if (save.equipped) {
@@ -2587,7 +2673,8 @@ function renderHub(t) {
   ctx.fillStyle = "#e8dcff"; rr(W - 200, H - 96, 100, 52, 16); ctx.fill();
   drawEgg(ctx, W - 150, H - 140, 52, save.eggTier, t * 0.06, 0);
   // hero idling on the left
-  drawDumplingHero(126, H - 45, 1.15, t, { run: t * 1.2, air: 0, squash: Math.sin(t * 2) * 0.05, face: 1 });
+  drawDumplingHero(126, H - 45, 1.15, t, { run: t * 1.2, air: 0, squash: Math.sin(t * 2) * 0.05, face: 1,
+    palette: currentPalette(), accessory: save.accessory });
   // owned squishies float around like little balloons
   const own = SQUISHIES.filter(s => owned(s.id));
   own.slice(0, 10).forEach((s, i) => {
@@ -2654,6 +2741,25 @@ function showMenu(html) {
     if (!c.roundRect) c.roundRect = CanvasRenderingContext2D.prototype.roundRect;
     drawSquishy(c, size/2, size/2, size * 0.36, def, 0);
   });
+  // and any little skin swatches -- a simple gradient blob, not the full hero rig
+  sheetEl.querySelectorAll("canvas[data-preview-palette]").forEach(cv => {
+    const id = cv.dataset.previewPalette;
+    const preset = PALETTES.find(p => p.id === id);
+    const sq = !preset && byId(id);
+    const stops = preset ? preset.stops : sq ? squishyPalette(sq) : CLASSIC_PALETTE;
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    const size = +cv.dataset.size || 54;
+    cv.width = size * dpr; cv.height = size * dpr;
+    cv.style.width = size + "px"; cv.style.height = size + "px";
+    const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const r = size * 0.4;
+    const g = c.createLinearGradient(size/2 - r, size/2 - r, size/2 + r, size/2 + r);
+    for (const [stop, color] of stops) g.addColorStop(stop, color);
+    c.fillStyle = g; c.strokeStyle = "rgba(88,66,104,.4)"; c.lineWidth = 1.4;
+    c.beginPath(); c.ellipse(size/2, size/2, r, r * 0.92, 0, 0, 7); c.fill(); c.stroke();
+    c.fillStyle = "rgba(255,255,255,.55)";
+    c.beginPath(); c.ellipse(size/2 - r*0.35, size/2 - r*0.35, r*0.22, r*0.16, -0.5, 0, 7); c.fill();
+  });
 }
 const money = () => Math.floor(save.money);
 
@@ -2676,8 +2782,53 @@ function menuHub() {
         ${up ? `⬆️ Better Egg <span class="cost">${up}</span>` : "⬆️ Egg maxed!"}</button>
       <button data-act="trader">🤝 Squishy Trader</button>
       <button data-act="book">📖 Collection</button>
+      <button data-act="skins">👕 Skins</button>
       <button data-act="help">❔ How to Play</button>
     </div>`;
+}
+
+function menuSkins() {
+  const paletteCells = PALETTES.map(p => `
+    <div class="cell have ${save.skin === p.id ? "equipped" : ""}" data-act="equipSkin" data-id="${p.id}">
+      <canvas data-preview-palette="${p.id}" data-size="54"></canvas>
+      <div class="nm">${p.name}</div>
+    </div>`).join("");
+
+  const squishyCells = SQUISHIES.filter(s => owned(s.id)).map(s => `
+    <div class="cell have ${save.skin === s.id ? "equipped" : ""}" data-act="equipSkin" data-id="${s.id}">
+      <canvas data-preview-palette="${s.id}" data-size="54"></canvas>
+      <div class="nm">${s.name}</div>
+      <div class="rr" style="color:${RARITY_INK[s.r]}">${RARITY[s.r]}</div>
+    </div>`).join("");
+  const lockedCount = SQUISHIES.length - distinctOwned();
+
+  const accCells = ACCESSORIES.map(a => {
+    const unlocked = accessoryUnlocked(a);
+    const eq = save.accessory === a.id;
+    return `<div class="cell ${unlocked ? "have" : "locked"} ${eq ? "equipped" : ""}"
+        data-act="${unlocked ? "equipAcc" : ""}" data-id="${a.id}">
+      <div style="width:54px;height:54px;display:grid;place-items:center;font-size:30px;${unlocked ? "" : "opacity:.28;filter:grayscale(1)"}">${a.icon}</div>
+      <div class="nm">${a.name}</div>
+      <div class="rr" style="opacity:.7">${unlocked ? (eq ? "equipped" : "tap to wear") : a.hint}</div>
+    </div>`;
+  }).join("");
+
+  return `<h2>👕 Skins</h2>
+    <p class="sub">Recolor your dumpling and add a little something extra —<br>
+    this is separate from your equipped superpower</p>
+
+    <p class="sub" style="margin-bottom:.3em;font-weight:800;color:var(--ink)">Palettes</p>
+    <div class="grid">${paletteCells}</div>
+
+    <p class="sub" style="margin:.8em 0 .3em;font-weight:800;color:var(--ink)">
+      From your squishies ${squishyCells ? "" : "— hatch one to unlock its colours!"}</p>
+    ${squishyCells ? `<div class="grid">${squishyCells}</div>` : ""}
+    ${lockedCount > 0 ? `<p class="sub" style="opacity:.6">${lockedCount} more locked until you hatch them</p>` : ""}
+
+    <p class="sub" style="margin:.8em 0 .3em;font-weight:800;color:var(--ink)">Accessories</p>
+    <div class="grid">${accCells}</div>
+
+    <div class="btns"><button data-act="hub">Back</button></div>`;
 }
 
 function menuHelp() {
@@ -2872,6 +3023,7 @@ sheetEl.addEventListener("click", e => {
     case "hub":     goHub(); break;
     case "help":    showMenu(menuHelp()); break;
     case "book":    showMenu(menuBook()); break;
+    case "skins":   showMenu(menuSkins()); break;
     case "trader":  showMenu(menuTrader()); break;
     case "hatch":   beginHatch(false); break;
     case "upgrade": {
@@ -2886,6 +3038,19 @@ sheetEl.addEventListener("click", e => {
       const id = el.dataset.id;
       if (owned(id)) { save.equipped = save.equipped === id ? null : id; persist(); }
       showMenu(menuBook()); break;
+    }
+    case "equipSkin": {
+      const id = el.dataset.id;
+      const ok = PALETTES.some(p => p.id === id) || (byId(id) && owned(id));
+      if (ok) { save.skin = save.skin === id ? "classic" : id; persist(); }
+      showMenu(menuSkins()); break;
+    }
+    case "equipAcc": {
+      const acc = ACCESSORIES.find(a => a.id === el.dataset.id);
+      if (acc && accessoryUnlocked(acc)) {
+        save.accessory = save.accessory === acc.id ? null : acc.id; persist();
+      }
+      showMenu(menuSkins()); break;
     }
     case "trade": {
       const t = +el.dataset.t;
@@ -2950,6 +3115,7 @@ function frame(now) {
 window.__SE = { game, save, player, run, world, startRun, goHub, beginHatch, persist, MUSIC, SECTIONS,
                 rainbowY, startRainbow, endRainbow, buildChunk, resetWorld, grabStar, VERSION,
                 tileAtPx, isSolidPx, bumpBrick, equippedPower,
+                PALETTES, ACCESSORIES, currentPalette, squishyPalette, accessoryUnlocked,
                 SQUISHIES, EGGS, TEMPLATES, grant, input, reset(){ localStorage.removeItem(SAVE_KEY); location.reload(); } };
 
 /* first boot: the common egg from the spec, free, hatching on its own */

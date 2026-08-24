@@ -66,6 +66,26 @@ bursts into rubble, worth a couple of coins, leaving a hole you can jump
 straight through. They're built to guard something — a carrot sits directly
 over some of them.
 
+## 👕 Skins
+
+A new Hub button, separate from everything else. Two independent things live
+here, and neither touches your equipped superpower (that's still the
+Collection screen) — you could be flying-powered while wearing a totally
+different colour.
+
+**Palettes** — six pastel colourways for the dumpling's body, available from
+the very first launch. No squishies needed.
+
+**From your squishies** — every squishy you've ever hatched (owning it is
+enough, it doesn't need to be equipped) unlocks a recolour built from that
+squishy's own two colours. Hatch Bunny, get a pink-and-white dumpling. Hatch
+Cosmic Squish, get a deep starry purple one. It's automatic — add a new
+squishy to `SQUISHIES` and it gets a skin for free, no art required.
+
+**Accessories** — four small extras unlocked by general progress rather than
+any one squishy: a party hat (200m in a run), a bandana (5 runs finished), a
+bow tie (5 different squishies collected), and sunglasses (600m in a run).
+
 ## Rarities and superpowers
 
 There are now **five rarities**: Common, Uncommon, Rare, Super Rare, and
@@ -227,6 +247,10 @@ Three rules so the course stays possible:
 
 ### Other knobs
 
+- `PALETTES` — the base skin colourways, `ACCESSORIES` — the progress-unlocked
+  extras (each has a `need` function that reads `save`). `squishyPalette()` is
+  what auto-derives a skin from any squishy's `c1`/`c2` — no per-squishy skin
+  art needed.
 - `SQUISHIES` — the collection. Add one and it appears in the book automatically.
   `shape` picks how it's drawn (`dumpling`, `round`, `block`, `berry`, `banana`,
   `cheese`, `paw`, `cloud`, `ring`, `star`, `peach`, `pickle`, `tomato`,
@@ -297,6 +321,12 @@ collection.
 
 The version is shown on the main menu, under the title.
 
+- **v1.8.0** — a new Skins hub section: six always-available palettes, a
+  recolour auto-derived from every squishy you've hatched, and four
+  accessories unlocked by general progress. Fully independent from your
+  equipped superpower.
+- **v1.7.1** — the IDFKA cheat now also matches on e.key, not just e.code, so
+  it's not thrown off by virtual keyboards or unusual input methods.
 - **v1.7.0** — the trampoline no longer switches into a separate cloud mode;
   it's just a much bigger jump now, with a short peaceful music dip while
   you're airborne from it. Trampolines are half as common. Every course piece
