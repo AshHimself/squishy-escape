@@ -1061,6 +1061,11 @@ function endRun(cause) {
   save.bestDist  = Math.max(save.bestDist, run.dist);
   save.bestMoney = Math.max(save.bestMoney, run.money);
   persist();
+  // silently post the new score to the leaderboard, registered players only
+  if (save.cloudPlayerId && window.MP && MP.available()) {
+    MP.updateSave({ best_dist: save.bestDist, best_money: save.bestMoney, money: save.money, runs: save.runs })
+      .catch(() => {});
+  }
 }
 
 /* Head-butting a brick from below cracks it; three goes and it bursts, leaving
@@ -2835,10 +2840,36 @@ let mp = {
   unwatchRoom: null, unwatchTrade: null,
   trade: null, myOffer: [],
   busy: false, error: null,
+  leaderboard: null,   // cached rows from the last load, or null before first load
 };
 
 function menuMPLoading(msg) {
   return `<h2>🌐 Trade Online</h2><p class="sub">${escapeHtml(msg || "Just a sec…")}</p>`;
+}
+
+async function openLeaderboard() {
+  showMenu(`<h2>🏆 Leaderboard</h2><p class="sub">Loading…</p><div class="btns"><button data-act="hub">Back</button></div>`);
+  try { mp.leaderboard = await MP.getLeaderboard(10); } catch (e) { mp.leaderboard = []; }
+  showMenu(menuLeaderboard());
+}
+
+function menuLeaderboard() {
+  const medals = ["🥇", "🥈", "🥉"];
+  const rows = (mp.leaderboard || []).map((r, i) => `
+    <div style="display:flex;justify-content:space-between;gap:1em;background:#f6f2fb;border-radius:14px;
+      padding:.5em 1em;font-weight:800;${r.nickname === mp.nickname ? "outline:3px solid #ffb0d0" : ""}">
+      <span>${medals[i] || (i + 1) + "."} ${escapeHtml(r.nickname)}</span>
+      <span>${r.bestDist} m</span>
+    </div>`).join("") || `<p class="sub">No runs on the board yet — be the first!</p>`;
+
+  return `<h2>🏆 Leaderboard</h2>
+    <p class="sub">Best distance, registered players only</p>
+    <div style="display:flex;flex-direction:column;gap:.4em;max-width:340px;margin:0 auto 1em">${rows}</div>
+    ${!save.cloudPlayerId ? `<p class="sub" style="font-weight:800">🌐 Sign up in Trade Online to put your name here!</p>` : ""}
+    <div class="btns">
+      ${!save.cloudPlayerId ? `<button class="primary" data-act="multiplayer">🌐 Sign Up</button>` : ""}
+      <button data-act="hub">Back</button>
+    </div>`;
 }
 
 function menuRegister() {
@@ -3054,6 +3085,7 @@ function menuHub() {
       <button data-act="book">📖 Collection</button>
       <button data-act="skins">👕 Skins</button>
       <button data-act="multiplayer" ${window.MP && MP.available() ? "" : "disabled"}>🌐 Trade Online</button>
+      <button data-act="leaderboard" ${window.MP && MP.available() ? "" : "disabled"}>🏆 Leaderboard</button>
       <button data-act="help">❔ How to Play</button>
     </div>`;
 }
@@ -3226,6 +3258,8 @@ function menuGameOver() {
     </div>
     <p class="sub">(includes a +${run.bonus} distance bonus) — you now have <b>${money()}</b> 🪙${
       run.dist >= save.bestDist && run.dist > 0 ? `<br>🎉 New best distance!` : ""}</p>
+    ${run.dist >= save.bestDist && run.dist > 0 && !save.cloudPlayerId && window.MP && MP.available()
+      ? `<p class="sub" style="font-weight:800">🏆 Sign up in Trade Online to put this run on the leaderboard!</p>` : ""}
     <div class="btns">
       <button class="primary" data-act="start">↻ Run Again</button>
       <button data-act="hub">🏠 Hub</button>
@@ -3344,6 +3378,7 @@ sheetEl.addEventListener("click", e => {
       break;
     }
     case "multiplayer":  mpOpenEntry(); break;
+    case "leaderboard":  openLeaderboard(); break;
     case "mpAuthMode":   mp.authMode = el.dataset.id; mp.error = null; showMenu(menuRegister()); break;
     case "mpAuthSubmit": mpAuthSubmit(); break;
     case "mpLogout":

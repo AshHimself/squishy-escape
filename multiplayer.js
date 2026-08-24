@@ -228,6 +228,20 @@
 
   // --------------------------- inventory sync -------------------------------
 
+  // Updates this device's player_saves row (money/eggTier/bestDist/etc).
+  // Used both for the lobby's pre-trade sync and for silently posting a
+  // new high score after a run, if the player is registered.
+  async function updateSave(saveFields) {
+    if (!available()) throw new MPError("offline");
+    const me = await whoami();
+    if (!me) throw new MPError("not_registered");
+    const { error } = await sb
+      .from("player_saves")
+      .update({ ...saveFields, updated_at: new Date().toISOString() })
+      .eq("player_id", me.playerId);
+    if (error) throw new MPError((error.message || "").trim());
+  }
+
   // Pushes non-zero local counts + save fields up before a trading session.
   async function pushInventory(counts, saveFields) {
     if (!available()) throw new MPError("offline");
@@ -242,13 +256,14 @@
       if (error) throw new MPError((error.message || "").trim());
     }
 
-    if (saveFields) {
-      const { error } = await sb
-        .from("player_saves")
-        .update({ ...saveFields, updated_at: new Date().toISOString() })
-        .eq("player_id", me.playerId);
-      if (error) throw new MPError((error.message || "").trim());
-    }
+    if (saveFields) await updateSave(saveFields);
+  }
+
+  // Top players by best distance. No sign-in required to call this -- the
+  // whole point is a not-yet-registered visitor can see what they're missing.
+  async function getLeaderboard(limit = 10) {
+    const rows = await rpc("get_leaderboard", { p_limit: limit });
+    return (rows || []).map((r) => ({ nickname: r.nickname, bestDist: r.best_dist, bestMoney: r.best_money }));
   }
 
   // Pulls player_inventory back down into a plain {squishyId: qty} map.
@@ -287,6 +302,8 @@
     watchTrade,
     pushInventory,
     pullInventory,
+    updateSave,
+    getLeaderboard,
     MPError,
   };
 })();
