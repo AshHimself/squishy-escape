@@ -1061,10 +1061,17 @@ function endRun(cause) {
   save.bestDist  = Math.max(save.bestDist, run.dist);
   save.bestMoney = Math.max(save.bestMoney, run.money);
   persist();
-  // silently post the new score to the leaderboard, registered players only
-  if (save.cloudPlayerId && window.MP && MP.available()) {
-    MP.updateSave({ best_dist: save.bestDist, best_money: save.bestMoney, money: save.money, runs: save.runs })
-      .catch(() => {});
+  // post the new score to the leaderboard, registered players only -- any
+  // failure surfaces as mp.syncNotice next time the hub renders, rather
+  // than silently doing nothing
+  if (save.cloudPlayerId) {
+    if (window.MP && MP.available()) {
+      MP.updateSave({ best_dist: save.bestDist, best_money: save.bestMoney, money: save.money, runs: save.runs })
+        .then(() => { mp.syncNotice = null; })
+        .catch(() => { mp.syncNotice = "⚠️ Your last score didn't save online — try signing in again."; });
+    } else {
+      mp.syncNotice = "⚠️ Couldn't reach the leaderboard to save your score (you're still saved locally).";
+    }
   }
 }
 
@@ -2841,6 +2848,7 @@ let mp = {
   trade: null, myOffer: [],
   busy: false, error: null,
   leaderboard: null,   // cached rows from the last load, or null before first load
+  syncNotice: null,    // set when a post-run score push fails, shown once on the hub
 };
 
 function menuMPLoading(msg) {
@@ -3070,6 +3078,14 @@ function menuHub() {
   return `
     <h1>Squishy Escape</h1>
     <p class="sub">by Annie Smith &amp; Ash Smith <span class="ver">v${VERSION}</span></p>
+    <p class="sub" style="margin-top:-.4em">${
+      !(window.MP && MP.available())
+        ? `<span class="ver">👤 Offline — sign-in unavailable</span>`
+        : save.cloudPlayerId
+          ? `<span class="ver" style="background:var(--mint)">👤 Signed in as ${escapeHtml(save.cloudNickname)}</span>`
+          : `<span class="ver" style="background:var(--pink)">👤 Not signed in</span> <button class="small" data-act="multiplayer">Sign Up</button>`
+    }</p>
+    ${mp.syncNotice ? `<p class="sub" style="color:#c0392b;font-weight:800">${escapeHtml(mp.syncNotice)}</p>` : ""}
     <div class="stats">
       <div class="stat money">🪙<b>${money()}</b>Dumpleningness</div>
       <div class="stat egg">🥚<b>${egg.name}</b>your egg</div>
