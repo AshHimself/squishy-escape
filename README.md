@@ -333,6 +333,45 @@ __SE.reset()                  // wipe the save and start over
 Progress is saved in the browser on that device, so each computer has its own
 collection.
 
+## Multiplayer trading (Trade Online)
+
+Up to 3 people can join a live room together and trade squishies with each
+other in real time. It's entirely optional — skip it and the game plays
+exactly as before, fully offline.
+
+**How it works for a player:** tap **🌐 Trade Online** on the hub, pick a
+nickname and a 4-digit PIN (no email, no password), then either create a
+room (you get a short code) or join a friend's with their code. Up to 3
+people per room. Tap **Trade** next to someone to open a trade sheet, tap
+your squishies to offer them, **Send Offer**, then both people tap
+**Confirm Trade** to swap.
+
+**How it's built:** [Supabase](https://supabase.com) — Postgres for
+identity/inventory/sessions/trades, Realtime for the live roster and trade
+sync, and Anonymous Auth as the transport underneath the nickname+PIN login.
+Everything server-side lives in `security definer` Postgres functions
+(`supabase/migrations/0005_rpc_functions.sql`) called directly from the
+browser — there's no separate backend server or serverless function. See
+`multiplayer.js` for the client side and `supabase/migrations/` for the
+database schema.
+
+### Setting up your own Supabase project
+
+1. Create a free project at [supabase.com](https://supabase.com).
+2. In **Authentication → Providers**, enable **Anonymous Sign-Ins**.
+3. Push the schema: `npx supabase link --project-ref <your-project-ref>`
+   then `npx supabase db push` from this directory (needs `npx supabase
+   login` first).
+4. Copy your project's URL and `anon` public key from **Project Settings →
+   API**, and put them in `multiplayer.js` (`SB_URL` / `SB_ANON_KEY` near
+   the top). Both are meant to be public — the database is protected by Row
+   Level Security, not by keeping the key secret.
+5. Refresh `index.html` — the **Trade Online** button lights up once
+   `multiplayer.js` can reach your project.
+
+You can also point at a project without editing the file, e.g. for testing
+a second environment: `index.html?sb=https://xxx.supabase.co&key=xxxx`.
+
 ## Versions
 
 The version is shown on the main menu, under the title.
