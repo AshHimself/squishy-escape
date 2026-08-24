@@ -102,6 +102,15 @@
   .cell .ct{position:absolute;top:3px;right:6px;font-size:10px;font-weight:900;opacity:.6}
   .cell .pw{font-size:9px;font-weight:800;color:#c0299c;margin-top:-.1em}
   .cell.locked .nm{opacity:.35}
+
+  /* ---------- multiplayer forms ---------- */
+  .mpForm{display:flex;flex-direction:column;gap:.6em;margin:1em auto;max-width:320px}
+  .mpForm input{
+    font:inherit;font-weight:800;color:var(--ink);text-align:center;
+    background:#f6f2fb;border:2px solid var(--lav);border-radius:14px;
+    padding:.6em 1em;font-size:clamp(13px,2.4vmin,20px);
+  }
+  .mpForm input:focus{outline:none;border-color:#ffb0d0}
   .tradeRow{display:flex;align-items:center;justify-content:space-between;gap:.6em;background:#f6f2fb;border-radius:14px;padding:.5em .7em;margin-bottom:.4em;font-weight:800;font-size:clamp(10px,1.9vmin,16px);text-align:left}
   .odds{display:flex;gap:.35em;justify-content:center;flex-wrap:wrap;margin:.3em 0 .7em}
   .odds span{background:#f4f0fa;border-radius:10px;padding:.3em .55em;font-size:clamp(9px,1.7vmin,14px);font-weight:800}
@@ -152,6 +161,10 @@
 
   <div class="layer" id="menu"><div class="sheet" id="sheet"></div></div>
 </div>
+<!-- Optional: only needed for "Trade Online" -- the game runs fully
+     offline/single-player without either of these loading. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="multiplayer.js"></script>
 <script>
 /* =====================================================================
    SQUISHY ESCAPE
@@ -165,7 +178,7 @@
 "use strict";
 
 /* ------------------------------ constants ------------------------------ */
-const VERSION = "1.8.0";           // major.minor.patch -- bump minor for features
+const VERSION = "1.8.1";           // major.minor.patch -- bump minor for features
 
 const W = 960, H = 540;            // virtual resolution
 const TILE = 45;                   // tile size
@@ -228,8 +241,24 @@ const BRICK_HITS  = 3;
 /* the trampoline -- a much bigger version of a normal jump, not a separate
    mode. You launch up near the clouds and land wherever gravity takes you,
    still inside the ordinary run the whole time. */
-const TRAMPOLINE_BOUNCE = 1200;
-const TRAMPOLINE_MUSIC  = 2.2;  // roughly how long the peaceful duck lasts
+const TRAMPOLINE_BOUNCE = 1750;
+const TRAMPOLINE_MUSIC  = 2.7;  // roughly how long the peaceful duck lasts
+const TRAMPOLINE_COINS  = 9;    // spawned fresh on each bounce, cleared after
+/* Full flight time at TRAMPOLINE_BOUNCE=1750, gravity=2200 is ~1.59s (apex at
+   0.795s, symmetric fall back to launch height). The re-trigger cooldown MUST
+   outlast that, or the player passes back through the trampoline's own
+   hitbox while still falling fast on the way down, re-triggers it, and never
+   actually lands -- an infinite bounce loop. Keep a healthy margin since
+   horizontal drift and JUMP_CUT exemption timing both nudge the real flight
+   time around a little. */
+const TRAMPOLINE_COOLDOWN = 2.4;
+/* The play camera never scrolls vertically in normal course sections -- rows
+   0-11 always fit the 540px screen. A trampoline bounce needs to send you
+   high enough that the ground genuinely leaves view, so the camera eases
+   upward whenever the player is above CAM_Y_LINE and settles back to 0 the
+   moment they're not (an ordinary jump barely grazes this, so normal play is
+   unaffected). One CAM_Y_LINE constant, one lerp, no per-scene special case. */
+const CAM_Y_LINE = 250;
 /* wooden platforms that give way */
 const WOOD_SHAKE  = 0.5;   // warning wobble before it drops
 const WOOD_BACK   = 3.2;   // and how long until it rebuilds itself
@@ -239,7 +268,8 @@ const SAVE_KEY = "squishyEscape.save.v1";
 const freshSave = () => ({
   money: 0, eggTier: 1, counts: {}, equipped: null,
   bestDist: 0, bestMoney: 0, runs: 0, seenIntro: false, muted: false, touchUI: false,
-  skin: "classic", accessory: null
+  skin: "classic", accessory: null,
+  cloudPlayerId: null, cloudNickname: null   // set once you register/log in for Trade Online
 });
 let save = (() => {
   try {
@@ -746,9 +776,9 @@ const TEMPLATES = [
 { tier:0, rows:[  // gentle trampoline -- bounce into a calm cloud break
 "................","................","................","................",
 "................","................","................","................",
-"......ooo.......","................",".......T........","################"]},
+"................","................",".......T........","################"]},
 { tier:2, rows:[  // a trampoline plaza
-"................","................","................","..ooo......ooo..",
+"................","................","................","................",
 "................","................","................","................",
 "................","................","..T.............","################"]},
 { tier:1, rows:[  // brick shelf, no trampoline this time
@@ -988,7 +1018,7 @@ const player = { x:100, y:455, w:30, h:40, vx:0, vy:0, prevY:455, onGround:false
                  face:1, coyote:0, buffer:0, iframes:0, hearts:3, anim:0, squash:0, combo:0, airJumps:1, star:0,
                  slide:false, slopeDir:0, lastSlope:0, slopeGrace:0, slideSfx:0, runT:0, runDir:0,
                  power:null, flyFuel:FLY_TIME, flying:false, cloudMusic:0 };
-const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, over:false, endT:0, rainbow:null };
+const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, camY:0, over:false, endT:0, rainbow:null };
 const trail  = [];   // breadcrumb positions so the companion squishy can follow
 
 function startRun() {
@@ -1002,7 +1032,7 @@ function startRun() {
   player.power = equippedPower(); player.flyFuel = FLY_TIME; player.flying = false;
   player.cloudMusic = 0;
   run.money = run.coins = run.stomps = run.dist = 0;
-  run.maxX = 100; run.wallX = -420; run.camX = 0; run.over = false; run.endT = 0;
+  run.maxX = 100; run.wallX = -420; run.camX = 0; run.camY = 0; run.over = false; run.endT = 0;
   run.rainbow = null;
   trail.length = 0;
   game.state = "play"; game.shake = 0;
@@ -1324,6 +1354,11 @@ function updatePlay(dt) {
       if (player.cloudMusic <= 0 || player.onGround) {
         player.cloudMusic = 0;
         MUSIC.setMode(player.star > 0 ? "star" : "run");
+        // dynamic sky coins only exist for the length of the bounce --
+        // performance: nothing lingers in world.coins once it's over
+        for (let i = world.coins.length - 1; i >= 0; i--) {
+          if (world.coins[i].dynamic) world.coins.splice(i, 1);
+        }
       }
     }
     if (player.star > 0) {
@@ -1495,7 +1530,7 @@ function updatePlay(dt) {
       if (!run.over && m.spent <= 0 && player.vy > 60 &&
           Math.abs((player.x + player.w/2) - m.x) < 26 &&
           (player.y + player.h) > m.y - 10 && (player.y + player.h) < m.y + 18) {
-        m.squish = 1; m.spent = 1.2;
+        m.squish = 1; m.spent = TRAMPOLINE_COOLDOWN;
         player.vy = -TRAMPOLINE_BOUNCE;
         player.onGround = false;
         player.airJumps = 1;
@@ -1505,6 +1540,16 @@ function updatePlay(dt) {
         burst(m.x, m.y - 10, "#dff0ff", 12, 200);
         S.boing();
         MUSIC.setMode("cloud");
+        // a little coin trail up into the clouds -- exists only for this
+        // bounce, cleaned up when it ends (see the cloudMusic countdown)
+        for (let i = 0; i < TRAMPOLINE_COINS; i++) {
+          const frac = (i + 1) / (TRAMPOLINE_COINS + 1);
+          world.coins.push({
+            x: m.x + Math.sin(frac * Math.PI * 2.2) * 50,
+            y: m.y - frac * 620 - 40,
+            got: false, t: Math.random() * 6, dynamic: true
+          });
+        }
       }
       continue;
     }
@@ -1552,6 +1597,8 @@ function updatePlay(dt) {
   const target = Math.max(player.x - 340, run.wallX - 40);
   run.camX += (target - run.camX) * Math.min(1, dt * 6);
   run.camX = Math.max(run.camX, run.wallX - 60);
+  const targetCamY = Math.max(0, CAM_Y_LINE - player.y);
+  run.camY += (targetCamY - run.camY) * Math.min(1, dt * 5);
   trail.unshift({ x: player.x, y: player.y });
   if (trail.length > 26) trail.pop();
 
@@ -2623,6 +2670,12 @@ function renderPlay(t) {
   ctx.save();
   if (game.shake > 0.3) ctx.translate((Math.random() - 0.5) * game.shake, (Math.random() - 0.5) * game.shake);
   drawSky(camX, t);
+
+  // everything tied to the course (terrain, entities, player) pans vertically
+  // during a big bounce so the ground can scroll out of view; the wall stays
+  // in fixed screen space either way, so it's drawn outside this block
+  ctx.save();
+  if (run.camY > 0.5) ctx.translate(0, run.camY);
   drawTiles(camX);
   for (const hz of world.hazards) if (hz.x > camX - 60 && hz.x < camX + W + 60) drawHazard(hz, camX, t);
   drawCoins(camX, t);
@@ -2645,6 +2698,8 @@ function renderPlay(t) {
     ctx.fillStyle = tx.color; ctx.fillText(tx.txt, tx.x - camX, tx.y);
   }
   ctx.globalAlpha = 1;
+  ctx.restore();
+
   drawWall(camX, t);
   drawWallWarning(camX, t);
   ctx.restore();
@@ -2763,6 +2818,212 @@ function showMenu(html) {
 }
 const money = () => Math.floor(save.money);
 
+/* ==========================================================================
+   MULTIPLAYER (Trade Online) -- talks only to window.MP (multiplayer.js).
+   Local save/counts stay the source of truth for offline single-player play;
+   the cloud inventory only matters while mp.sessionId is set (see mpPushLocal
+   / mpHandleTradeCompleted). Game-loop/render code above is untouched.
+   ========================================================================== */
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+}
+
+let mp = {
+  playerId: save.cloudPlayerId, nickname: save.cloudNickname,
+  authMode: "register", lastNickname: "",
+  sessionId: null, code: null, roster: [], notice: null,
+  unwatchRoom: null, unwatchTrade: null,
+  trade: null, myOffer: [],
+  busy: false, error: null,
+};
+
+function menuMPLoading(msg) {
+  return `<h2>🌐 Trade Online</h2><p class="sub">${escapeHtml(msg || "Just a sec…")}</p>`;
+}
+
+function menuRegister() {
+  const mode = mp.authMode;
+  return `
+    <h2>🌐 Trade Online</h2>
+    <p class="sub">${mode === "register"
+      ? "Pick a nickname and a 4-number PIN. Only tell your PIN to people you trust!"
+      : "Type the nickname and PIN you used before."}</p>
+    <div class="btns" style="margin-bottom:.6em">
+      <button class="${mode === "register" ? "primary" : ""}" data-act="mpAuthMode" data-id="register">New Profile</button>
+      <button class="${mode === "login" ? "primary" : ""}" data-act="mpAuthMode" data-id="login">Log In</button>
+    </div>
+    <div class="mpForm">
+      <input id="mpNickname" maxlength="16" placeholder="Nickname" autocomplete="off" value="${escapeHtml(mp.lastNickname)}">
+      <input id="mpPin" maxlength="4" inputmode="numeric" pattern="[0-9]*" placeholder="4-digit PIN" autocomplete="off">
+    </div>
+    ${mp.error ? `<p class="sub" style="color:#c0392b;font-weight:800">${escapeHtml(mp.error)}</p>` : ""}
+    <div class="btns">
+      <button class="primary" data-act="mpAuthSubmit" ${mp.busy ? "disabled" : ""}>
+        ${mode === "register" ? "✨ Create Profile" : "🔓 Log In"}</button>
+      <button data-act="hub">Back</button>
+    </div>`;
+}
+
+function menuLobby() {
+  if (!mp.sessionId) {
+    return `
+      <h2>🌐 Trade Online</h2>
+      <p class="sub">Hi ${escapeHtml(mp.nickname)}! Make a room, or join a friend's.</p>
+      <div class="btns"><button class="primary" data-act="mpCreateRoom" ${mp.busy ? "disabled" : ""}>➕ Create Room</button></div>
+      <div class="mpForm" style="flex-direction:row">
+        <input id="mpCode" maxlength="5" placeholder="ROOM CODE" style="text-transform:uppercase" autocomplete="off">
+        <button data-act="mpJoinRoom" ${mp.busy ? "disabled" : ""}>Join</button>
+      </div>
+      ${mp.error ? `<p class="sub" style="color:#c0392b;font-weight:800">${escapeHtml(mp.error)}</p>` : ""}
+      <div class="btns"><button data-act="mpLogout">Not you? Switch profile</button><button data-act="hub">Back</button></div>`;
+  }
+
+  const rosterHtml = mp.roster.map(p => `
+    <div class="cell have">
+      <div class="nm">${escapeHtml(p.nickname)}${p.playerId === mp.playerId ? " (you)" : ""}</div>
+      ${p.playerId !== mp.playerId ? `<button class="small" data-act="mpTradeWith" data-id="${p.playerId}">🤝 Trade</button>` : ""}
+    </div>`).join("") || `<p class="sub">Waiting for friends to join…</p>`;
+
+  return `
+    <h2>🌐 Room ${mp.code}</h2>
+    <p class="sub">Share this code with up to 2 friends nearby.</p>
+    <div class="grid">${rosterHtml}</div>
+    ${mp.notice ? `<p class="sub">${escapeHtml(mp.notice)}</p>` : ""}
+    ${mp.error ? `<p class="sub" style="color:#c0392b;font-weight:800">${escapeHtml(mp.error)}</p>` : ""}
+    <div class="btns"><button data-act="mpLeaveRoom">🚪 Leave Room</button><button data-act="hub">Back</button></div>`;
+}
+
+function menuTradeSession() {
+  const t = mp.trade;
+  if (!t) return menuLobby();
+
+  const mine = SQUISHIES.filter(s => owned(s.id)).map(s => `
+    <div class="cell have ${mp.myOffer.includes(s.id) ? "equipped" : ""}" data-act="mpToggleOffer" data-id="${s.id}">
+      <canvas data-sq="${s.id}" data-size="44"></canvas>
+      <div class="nm">${s.name}</div>
+    </div>`).join("");
+
+  const theirs = (t.offerTheirs || []).map(item => {
+    const s = byId(item.squishy_id);
+    return `<div class="cell have"><canvas data-sq="${item.squishy_id}" data-size="44"></canvas><div class="nm">${s ? s.name : "?"}</div></div>`;
+  }).join("") || `<p class="sub">Nothing offered yet</p>`;
+
+  return `
+    <h2>🤝 Trading with ${escapeHtml(t.otherNickname)}</h2>
+    <p class="sub" style="font-weight:800">Your offer — tap squishies to add or remove, then Send</p>
+    <div class="grid">${mine || "<p class='sub'>You don't have any squishies yet!</p>"}</div>
+    <div class="btns"><button data-act="mpSendOffer" ${mp.busy ? "disabled" : ""}>📤 Send Offer</button></div>
+
+    <p class="sub" style="font-weight:800;margin-top:1em">Their offer</p>
+    <div class="grid">${theirs}</div>
+
+    <p class="sub">${t.confirmedMine ? "✅ You confirmed" : ""} ${t.confirmedTheirs ? "✅ They confirmed" : ""}</p>
+    ${mp.error ? `<p class="sub" style="color:#c0392b;font-weight:800">${escapeHtml(mp.error)}</p>` : ""}
+    <div class="btns">
+      <button class="primary" data-act="mpConfirmTrade" ${mp.busy ? "disabled" : ""}>✅ Confirm Trade</button>
+      <button data-act="mpCancelTrade">✖ Cancel</button>
+    </div>`;
+}
+
+async function mpOpenEntry() {
+  if (!(window.MP && MP.available())) { showMenu(menuHub()); return; }
+  mp.error = null; mp.busy = true;
+  showMenu(menuMPLoading("Connecting…"));
+  try {
+    const who = await MP.whoami();
+    mp.busy = false;
+    if (who) {
+      mp.playerId = who.playerId; mp.nickname = who.nickname;
+      save.cloudPlayerId = who.playerId; save.cloudNickname = who.nickname; persist();
+      showMenu(menuLobby());
+    } else {
+      mp.authMode = "register";
+      showMenu(menuRegister());
+    }
+  } catch (err) {
+    mp.busy = false; mp.error = err.message || "Something went wrong.";
+    showMenu(menuRegister());
+  }
+}
+
+async function mpAuthSubmit() {
+  const nickname = (document.getElementById("mpNickname").value || "").trim();
+  const pin = (document.getElementById("mpPin").value || "").trim();
+  mp.lastNickname = nickname; mp.error = null;
+  if (nickname.length < 2 || nickname.length > 16) { mp.error = "Nicknames need to be 2–16 letters."; showMenu(menuRegister()); return; }
+  if (!/^[0-9]{4}$/.test(pin)) { mp.error = "Your PIN needs to be exactly 4 numbers."; showMenu(menuRegister()); return; }
+
+  mp.busy = true; showMenu(menuMPLoading(mp.authMode === "register" ? "Creating your profile…" : "Logging in…"));
+  try {
+    const who = mp.authMode === "register" ? await MP.registerPlayer(nickname, pin) : await MP.loginPlayer(nickname, pin);
+    mp.busy = false;
+    mp.playerId = who.playerId; mp.nickname = who.nickname;
+    save.cloudPlayerId = who.playerId; save.cloudNickname = who.nickname; persist();
+    showMenu(menuLobby());
+  } catch (err) {
+    mp.busy = false; mp.error = err.message || "Something went wrong.";
+    showMenu(menuRegister());
+  }
+}
+
+async function mpEnterRoom(action) {
+  mp.busy = true; mp.error = null;
+  showMenu(menuMPLoading("Just a sec…"));
+  try {
+    // push local squishy counts + settings up before anyone can trade with us
+    await MP.pushInventory(save.counts, {
+      money: save.money, egg_tier: save.eggTier, equipped: save.equipped,
+      best_dist: save.bestDist, best_money: save.bestMoney, runs: save.runs,
+      muted: save.muted, skin: save.skin, accessory: save.accessory,
+    });
+    const room = await action();
+    mp.sessionId = room.sessionId; mp.code = room.code;
+    mp.roster = await MP.fetchRoster(mp.sessionId);
+    mp.unwatchRoom = MP.watchRoom(mp.sessionId, { playerId: mp.playerId, nickname: mp.nickname }, {
+      onPresence: players => { mp.roster = players; if (!mp.trade) showMenu(menuLobby()); },
+      onBroadcast: payload => {
+        if (payload.type === "trade_started") mp.notice = "Someone started a trade…";
+        if (payload.type === "trade_completed") mp.notice = "A trade just finished!";
+        if (!mp.trade) showMenu(menuLobby());
+      },
+    });
+    mp.busy = false;
+    showMenu(menuLobby());
+  } catch (err) {
+    mp.busy = false; mp.error = err.message || "Something went wrong.";
+    showMenu(menuLobby());
+  }
+}
+
+function mpOnTradeRow(row) {
+  if (!mp.trade || mp.trade.id !== row.id) return;
+  const iAmA = row.player_a === mp.playerId;
+  mp.trade.offerMine = iAmA ? row.offer_a : row.offer_b;
+  mp.trade.offerTheirs = iAmA ? row.offer_b : row.offer_a;
+  mp.trade.confirmedMine = iAmA ? row.confirmed_a : row.confirmed_b;
+  mp.trade.confirmedTheirs = iAmA ? row.confirmed_b : row.confirmed_a;
+  mp.trade.status = row.status;
+
+  if (row.status === "completed") { mpHandleTradeCompleted(); return; }
+  if (row.status !== "negotiating") {
+    if (mp.unwatchTrade) { mp.unwatchTrade(); mp.unwatchTrade = null; }
+    mp.trade = null; mp.myOffer = [];
+    mp.notice = "The trade ended.";
+    showMenu(menuLobby());
+    return;
+  }
+  showMenu(menuTradeSession());
+}
+
+async function mpHandleTradeCompleted() {
+  try { save.counts = await MP.pullInventory(); persist(); } catch (e) { /* keep local counts if this fails */ }
+  if (mp.unwatchTrade) { mp.unwatchTrade(); mp.unwatchTrade = null; }
+  MP.broadcastTradeEvent(mp.sessionId, "trade_completed", {});
+  mp.trade = null; mp.myOffer = [];
+  mp.notice = "🎉 Trade complete!";
+  showMenu(menuLobby());
+}
+
 function menuHub() {
   const egg = eggDef();
   const up = egg.upgrade;
@@ -2783,6 +3044,7 @@ function menuHub() {
       <button data-act="trader">🤝 Squishy Trader</button>
       <button data-act="book">📖 Collection</button>
       <button data-act="skins">👕 Skins</button>
+      <button data-act="multiplayer" ${window.MP && MP.available() ? "" : "disabled"}>🌐 Trade Online</button>
       <button data-act="help">❔ How to Play</button>
     </div>`;
 }
@@ -3070,6 +3332,78 @@ sheetEl.addEventListener("click", e => {
         game.hatch = { t: 1.6, sq: pickOfRarity(t + 1), tier: save.eggTier, revealed: false, free: false };
         showMenu(null);
       }
+      break;
+    }
+    case "multiplayer":  mpOpenEntry(); break;
+    case "mpAuthMode":   mp.authMode = el.dataset.id; mp.error = null; showMenu(menuRegister()); break;
+    case "mpAuthSubmit": mpAuthSubmit(); break;
+    case "mpLogout":
+      mp.playerId = null; mp.nickname = null; save.cloudPlayerId = null; save.cloudNickname = null; persist();
+      mp.authMode = "login"; mp.error = null;
+      showMenu(menuRegister());
+      break;
+    case "mpCreateRoom": mpEnterRoom(() => MP.createRoom()); break;
+    case "mpJoinRoom": {
+      const code = (document.getElementById("mpCode").value || "").trim();
+      if (!code) break;
+      mpEnterRoom(() => MP.joinRoom(code));
+      break;
+    }
+    case "mpLeaveRoom": {
+      const sid = mp.sessionId;
+      if (mp.unwatchRoom) { mp.unwatchRoom(); mp.unwatchRoom = null; }
+      mp.sessionId = null; mp.code = null; mp.roster = []; mp.trade = null; mp.myOffer = []; mp.notice = null;
+      showMenu(menuLobby());
+      if (sid) MP.leaveRoom(sid).catch(() => {});
+      break;
+    }
+    case "mpTradeWith": {
+      const otherPlayerId = el.dataset.id;
+      const other = mp.roster.find(p => p.playerId === otherPlayerId);
+      mp.busy = true; mp.error = null;
+      MP.proposeTrade(mp.sessionId, otherPlayerId, [])
+        .then(tradeId => {
+          mp.busy = false;
+          mp.trade = { id: tradeId, otherPlayerId, otherNickname: other ? other.nickname : "them",
+                        offerMine: [], offerTheirs: [], confirmedMine: false, confirmedTheirs: false, status: "negotiating" };
+          mp.myOffer = [];
+          mp.unwatchTrade = MP.watchTrade(tradeId, mpOnTradeRow);
+          MP.broadcastTradeEvent(mp.sessionId, "trade_started", {});
+          showMenu(menuTradeSession());
+        })
+        .catch(err => { mp.busy = false; mp.error = err.message || "Something went wrong."; showMenu(menuLobby()); });
+      break;
+    }
+    case "mpToggleOffer": {
+      const id = el.dataset.id;
+      const i = mp.myOffer.indexOf(id);
+      if (i === -1) mp.myOffer.push(id); else mp.myOffer.splice(i, 1);
+      showMenu(menuTradeSession());
+      break;
+    }
+    case "mpSendOffer": {
+      if (!mp.trade) break;
+      const items = mp.myOffer.map(id => ({ squishy_id: id, qty: 1 }));
+      mp.trade.offerMine = items; mp.trade.confirmedMine = false; mp.trade.confirmedTheirs = false;
+      showMenu(menuTradeSession());
+      MP.updateTradeOffer(mp.trade.id, items).catch(err => { mp.error = err.message || "Something went wrong."; showMenu(menuTradeSession()); });
+      break;
+    }
+    case "mpConfirmTrade": {
+      if (!mp.trade) break;
+      mp.busy = true; mp.error = null;
+      MP.confirmTrade(mp.trade.id)
+        .then(() => { mp.busy = false; showMenu(menuTradeSession()); })
+        .catch(err => { mp.busy = false; mp.error = err.message || "Something went wrong."; showMenu(menuTradeSession()); });
+      break;
+    }
+    case "mpCancelTrade": {
+      if (!mp.trade) break;
+      const tradeId = mp.trade.id;
+      if (mp.unwatchTrade) { mp.unwatchTrade(); mp.unwatchTrade = null; }
+      mp.trade = null; mp.myOffer = [];
+      showMenu(menuLobby());
+      MP.cancelTrade(tradeId).catch(() => {});
       break;
     }
   }

@@ -143,7 +143,13 @@ Special pickups appear roughly every five course pieces, never two close
 together, and about 60% of them are stars — so carrots work out at roughly one
 every seventeen pieces and stay a lucky find. `CARROT_COIN`, `RAINBOW_TIME`,
 `RAINBOW_SPEED`, `STAR_TIME` and `MAX_HEARTS` at the top of the file tune all
-of it.
+of it. `TRAMPOLINE_BOUNCE` sets the trampoline's launch height, and
+`TRAMPOLINE_COOLDOWN` must always comfortably exceed the flight time that
+height implies (`launch_speed / GRAVITY`, doubled) — set it too short and the
+player passes back through the trampoline's own hitbox while still falling,
+re-triggers it, and never lands. `CAM_Y_LINE` is how high the player has to
+be before the camera starts panning to keep the ground out of view; ordinary
+jumps never reach it.
 
 ## 🧸 The trampoline
 
@@ -154,11 +160,21 @@ bounce** than a normal jump, up near the cloud layer in the background.
 This is deliberately *not* a separate mode like the rainbow ride. There's no
 timer, no locked camera, no scripted coin field — you're still inside the
 ordinary run the whole time, just launched a long way up by gravity, same as
-any other jump. The music dips into a short, peaceful phrase while you're
-airborne from the bounce and hands back to normal the moment you land (or
-after a couple of seconds, whichever comes first). Land wherever the arc
-happens to put you and keep running. The squish wall doesn't pause for this —
-you're never out of the run.
+any other jump. It's a *big* launch: high enough that the ground and hills
+scroll completely out of view and you're surrounded by sky and clouds. The
+camera only pans vertically for this — ordinary jumps and slopes never touch
+it, it eases back to normal automatically once you're back down near the
+ground. The music dips into a short, peaceful phrase while you're airborne
+from the bounce and hands back to normal the moment you land (or after a
+couple of seconds, whichever comes first). Land wherever the arc happens to
+put you and keep running. The squish wall doesn't pause for this, and it
+still renders in its normal fixed spot on screen — you're never out of the
+run.
+
+A handful of coins appear along the bounce's arc, but only for the length of
+that one bounce — they're created when you land on the trampoline and removed
+the moment the bounce ends, whether you collected them or not. Nothing about
+the trampoline adds anything to the world that outlives the bounce itself.
 
 ## The music
 
@@ -321,6 +337,13 @@ collection.
 
 The version is shown on the main menu, under the title.
 
+- **v1.8.1** — the trampoline launches much higher (high enough that the
+  camera now pans vertically to keep the ground out of view entirely), and
+  its sky coins are spawned fresh per bounce and cleared afterward rather
+  than sitting statically in the course. Also fixes a real bug the height
+  increase introduced: the re-trigger cooldown was shorter than the new,
+  longer flight time, so the player could catch the trampoline again on the
+  way down and bounce forever without landing.
 - **v1.8.0** — a new Skins hub section: six always-available palettes, a
   recolour auto-derived from every squishy you've hatched, and four
   accessories unlocked by general progress. Fully independent from your
