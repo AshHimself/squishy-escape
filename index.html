@@ -100,6 +100,7 @@
   .cell .nm{font-size:10px;font-weight:800;line-height:1.15}
   .cell .rr{font-size:9px;font-weight:800;opacity:.8}
   .cell .ct{position:absolute;top:3px;right:6px;font-size:10px;font-weight:900;opacity:.6}
+  .cell .pw{font-size:9px;font-weight:800;color:#c0299c;margin-top:-.1em}
   .cell.locked .nm{opacity:.35}
   .tradeRow{display:flex;align-items:center;justify-content:space-between;gap:.6em;background:#f6f2fb;border-radius:14px;padding:.5em .7em;margin-bottom:.4em;font-weight:800;font-size:clamp(10px,1.9vmin,16px);text-align:left}
   .odds{display:flex;gap:.35em;justify-content:center;flex-wrap:wrap;margin:.3em 0 .7em}
@@ -129,6 +130,8 @@
   <div class="layer" id="hud">
     <div class="hudrow">
       <div class="pill"><span id="hearts">💗💗💗</span></div>
+      <div class="pill" id="powerPill" style="display:none">
+        <span id="powerIcon"></span> <span id="powerLabel"></span></div>
       <div class="pill">🪙 <span id="hudMoney">0</span> <span style="opacity:.55">Dumpleningness</span></div>
       <div class="pill">📏 <span id="hudDist">0</span> m</div>
     </div>
@@ -138,7 +141,6 @@
     <div id="tcMove">
       <div class="tbtn" id="tcLeft">◀</div>
       <div class="tbtn" id="tcRight">▶</div>
-      <div class="tbtn" id="tcDown">▼</div>
     </div>
     <div class="tbtn" id="tcJump">⤴</div>
   </div>
@@ -163,7 +165,7 @@
 "use strict";
 
 /* ------------------------------ constants ------------------------------ */
-const VERSION = "1.5.0";           // major.minor.patch -- bump minor for features
+const VERSION = "1.6.0";           // major.minor.patch -- bump minor for features
 
 const W = 960, H = 540;            // virtual resolution
 const TILE = 45;                   // tile size
@@ -190,9 +192,9 @@ const IFRAMES      = 1.4;
 const MAX_HEARTS   = 5;
 const STAR_TIME    = 11.05; // Super-Mario-style invincibility (8.5s + 30%)
 
-const WALL_BASE  = 72;    // squish wall speed at the start (px/s)
-const WALL_GAIN  = 0.055; // ...plus this much per metre travelled
-const WALL_MAX   = 265;
+const WALL_BASE  = 85;    // squish wall speed at the start (px/s)
+const WALL_GAIN  = 0.066; // ...plus this much per metre travelled
+const WALL_MAX   = 305;
 const WALL_LEASH = 950;   // if you get further ahead than this, it speeds up
 
 /* the magical carrot and the rainbow ride it launches you into */
@@ -202,6 +204,16 @@ const RAINBOW_LIFT  = 2050;  // hold jump to climb
 const RAINBOW_FALL  = 1150;
 const RAINBOW_VMAX  = 460;
 const CARROT_COIN   = 3;     // sky coins are worth more than ground ones
+
+/* superpowers -- only the Mythic squishies carry one, and only the equipped
+   one is active. Multipliers are deliberately noticeable but not game-breaking. */
+const POWER_SPEED_MULT = 1.3;
+const POWER_JUMP_MULT  = 1.32;
+const POWER_BIG_SCALE  = 1.32;
+const POWER_BIG_STEP   = 1.6;   // step-up lip height multiplier while big
+const FLY_TIME  = 10;
+const FLY_LIFT  = 3400;   // must clearly beat GRAVITY (2200) or the player never climbs
+const FLY_VMAX  = 260;
 
 /* sliding down a slope */
 const SLIDE_ACCEL = 1500;
@@ -213,6 +225,13 @@ const SLIDE_MAX   = 540;
 const STEP_UP     = 24;
 /* brick blocks you can smash open from underneath */
 const BRICK_HITS  = 3;
+/* the trampoline and its calm cloud bonus */
+const CLOUD_TIME  = 9;
+const CLOUD_SPEED = 300;
+const CLOUD_LIFT  = 1350;
+const CLOUD_FALL  = 780;
+const CLOUD_VMAX  = 300;
+const CLOUD_COIN  = 2;
 /* wooden platforms that give way */
 const WOOD_SHAKE  = 0.5;   // warning wobble before it drops
 const WOOD_BACK   = 3.2;   // and how long until it rebuilds itself
@@ -264,6 +283,7 @@ const S = {
   star:  () => [0, 60, 120, 180].forEach((d, i) =>
     setTimeout(() => sfx([784, 988, 1175, 1568][i], 0.22, "square", 0.07), d)),
   heart: () => [0, 110].forEach((d, i) => setTimeout(() => sfx([659, 880][i], 0.3, "triangle", 0.07), d)),
+  boing: () => { sfx(360, 0.1, "sine", 0.06, 260); setTimeout(() => sfx(520, 0.14, "triangle", 0.055, 140), 60); },
   carrot:() => [0, 70, 140, 210, 300, 400].forEach((d, i) =>
     setTimeout(() => sfx([523, 659, 784, 1046, 1318, 1568][i], 0.3, "triangle", 0.075), d)),
   crack: () => sfx(220, 0.08, "square", 0.06, 120),
@@ -303,6 +323,10 @@ const SECTIONS = {
     lead: [79, 84, 88, 84, 79, 84, 88, 91, 88, 84, 81, 84, 88, 84, 81, 79],
     roots: [48, 48, 53, 55], bassEvery: 2,
     kick: "x.x.x.x.x.x.x.x.", snare: "....x.......x...", hat: "xxxxxxxxxxxxxxxx" },
+  cloud: { bpm: 76, wave: "sine", arp: false, swing: 0.1,
+    lead: [79, null, 76, null, 72, null, 76, null, 74, null, 79, null, 76, null, null, null],
+    roots: [48, 53, 45, 48], bassEvery: 8,
+    kick: "x...............", snare: "................", hat: "................" },
   rainbow: { bpm: 152, wave: "triangle", arp: true, swing: 0,
     lead: [84, 88, 91, 88, 93, 91, 88, 84, 86, 88, 91, 93, 91, 88, 86, 84],
     roots: [48, 53, 55, 53], bassEvery: 2,
@@ -346,6 +370,7 @@ const MUSIC = {
   pickSection() {
     if (this.mode === "hub") { this.sec = SECTIONS.hub; this.level = -1; return; }
     if (this.mode === "rainbow") { this.sec = SECTIONS.rainbow; this.level = -2; return; }
+    if (this.mode === "cloud")   { this.sec = SECTIONS.cloud;   this.level = -4; return; }
     if (this.mode === "star")    { this.sec = SECTIONS.star;    this.level = -3; return; }
     // these thresholds line up with where the course unlocks harder chunks
     const lvl = run.dist < 80 ? 0 : run.dist < 176 ? 1 : run.dist < 320 ? 2 : 3;
@@ -373,7 +398,7 @@ const MUSIC = {
     if (S2.lead[i] != null) this.tone(t, S2.lead[i], dur * 1.7, 0.055, S2.wave);
     if (i % S2.bassEvery === 0) this.bass(t, root - 12, dur * 1.6, 0.055);
     if (S2.arp) this.tone(t, root + [12, 19, 24, 19][i % 4], dur * 0.8, 0.022, "square");
-    if (S2.kick[i]  === "x") this.kick(t, 0.085);
+    if (S2.kick[i]  === "x") this.kick(t, this.mode === "cloud" ? 0.045 : 0.085);
     if (S2.snare[i] === "x") this.hit(t, 0.095, 0.045, 1500, "bandpass");
     if (S2.hat[i]   === "x") this.hit(t, 0.035, 0.018, 7200, "highpass");
   },
@@ -427,9 +452,9 @@ const MUSIC = {
 };
 
 /* -------------------------------- squishies ----------------------------- */
-const RARITY = ["Common", "Uncommon", "Rare", "Super Rare"];
-const RARITY_BG = ["#d8f5e6", "#d9ecff", "#e4dbff", "#ffe3c2"];
-const RARITY_INK = ["#3f8f74", "#3f72b8", "#7b53c4", "#c07a24"];
+const RARITY = ["Common", "Uncommon", "Rare", "Super Rare", "Mythic"];
+const RARITY_BG = ["#d8f5e6", "#d9ecff", "#e4dbff", "#ffe3c2", "#ffd6f5"];
+const RARITY_INK = ["#3f8f74", "#3f72b8", "#7b53c4", "#c07a24", "#c0299c"];
 
 // shape: how the little guy is drawn. c1 = body, c2 = shading/detail.
 const SQUISHIES = [
@@ -449,19 +474,33 @@ const SQUISHIES = [
   { id:"sherbet", name:"Sherbet Star",    r:2, shape:"star",     c1:"#ffd0a8", c2:"#ff9f7a" },
   { id:"prisma",  name:"Prisma Dumpling", r:3, shape:"dumpling", c1:"#ffe8f4", c2:"#cfe6ff", rainbow:true, shine:true },
   { id:"golden",  name:"Golden Dumplen",  r:3, shape:"round",    c1:"#ffe07a", c2:"#e0a516", shine:true },
-  { id:"cosmic",  name:"Cosmic Squish",   r:3, shape:"star",     c1:"#8f7ad6", c2:"#4b3b8f", stars:true, shine:true }
+  { id:"cosmic",  name:"Cosmic Squish",   r:3, shape:"star",     c1:"#8f7ad6", c2:"#4b3b8f", stars:true, shine:true },
+  { id:"mango",   name:"Crunchy Mango",   r:3, shape:"mango",    c1:"#ffcf6b", c2:"#ff8a3d" },
+  { id:"peach",   name:"Peach",           r:1, shape:"peach",    c1:"#ffd8c2", c2:"#ff9fae" },
+  { id:"tomato",  name:"Tomato",          r:1, shape:"tomato",   c1:"#ff8a72", c2:"#e0503a" },
+  { id:"pickle",  name:"Pickle",          r:2, shape:"pickle",   c1:"#bfe090", c2:"#7fae4a" },
+  { id:"sloth",   name:"Sloth",           r:2, shape:"sloth",    c1:"#d8c19c", c2:"#a9855c" },
+  { id:"bunny",   name:"Bunny",           r:4, shape:"bunny",    c1:"#fff6f2", c2:"#ffc2d6", shine:true,
+    power:"speed", powerName:"Speedy Feet", powerDesc:"Run and sprint noticeably faster." },
+  { id:"sunflower",name:"Sunflower",      r:4, shape:"flower",   c1:"#ffe073", c2:"#7a5a2e", shine:true,
+    power:"jump", powerName:"Big Bounce", powerDesc:"Jump and double-bounce much higher." },
+  { id:"cheeseblock",name:"Cheese Block", r:4, shape:"cheeseblock", c1:"#ffe08a", c2:"#e0b23f", shine:true,
+    power:"big", powerName:"Big Squish", powerDesc:"Grow bigger and step over taller ledges." },
+  { id:"glitter", name:"Glitter Dumplen", r:4, shape:"dumpling", c1:"#ffe8f8", c2:"#d8b8ff", rainbow:true, stars:true, shine:true,
+    power:"fly", powerName:"Cape Flight", powerDesc:"Hold jump in the air to fly — about 10s before you need to land and recharge." }
 ];
 const byId = id => SQUISHIES.find(s => s.id === id);
 
 // Egg tiers: nicer egg -> better odds. [Common, Uncommon, Rare, Super Rare]
 const EGGS = [
-  { name:"Common Egg",     odds:[75, 20, 4.5, 0.5], upgrade:120  },
-  { name:"Uncommon Egg",   odds:[55, 32, 11,  2  ], upgrade:320  },
-  { name:"Rare Egg",       odds:[35, 38, 21,  6  ], upgrade:800  },
-  { name:"Super Rare Egg", odds:[18, 34, 33,  15 ], upgrade:1800 },
-  { name:"Legendary Egg",  odds:[5,  25, 40,  30 ], upgrade:null }
+  { name:"Common Egg",     odds:[74, 20, 4.7, 1.2, 0.1], upgrade:100  },
+  { name:"Uncommon Egg",   odds:[54, 32, 11,  2.6, 0.4], upgrade:300  },
+  { name:"Rare Egg",       odds:[34, 37, 21,  6.5, 1.5], upgrade:750  },
+  { name:"Super Rare Egg", odds:[17, 33, 32,  14,  4  ], upgrade:1700 },
+  { name:"Legendary Egg",  odds:[5,  23, 38,  26,  8  ], upgrade:4200 },
+  { name:"Mythic Egg",     odds:[2,  14, 30,  34,  20 ], upgrade:null }
 ];
-const HATCH_COST = 30;
+const HATCH_COST = 25;
 const eggDef = () => EGGS[Math.min(save.eggTier, EGGS.length) - 1];
 
 function rollSquishy() {
@@ -487,7 +526,7 @@ const dupesOfRarity = t => SQUISHIES.filter(s => s.r === t)
 
 /* --------------------------------- input -------------------------------- */
 const keys = Object.create(null);
-const input = { left:false, right:false, down:false, jumpHeld:false, jumpPressed:false };
+const input = { left:false, right:false, jumpHeld:false, jumpPressed:false };
 function setJump(down) {
   if (down && !input.jumpHeld) input.jumpPressed = true;
   input.jumpHeld = down;
@@ -496,7 +535,7 @@ addEventListener("keydown", e => {
   if (e.repeat) return;
   audioOn();
   keys[e.code] = true;
-  if (["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) e.preventDefault();
+  if (["Space","ArrowUp","ArrowLeft","ArrowRight"].includes(e.code)) e.preventDefault();
   if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") setJump(true);
   if (e.code === "KeyM") toggleMute();
   if ((e.code === "KeyP" || e.code === "Escape") && (game.state === "play" || game.state === "paused")) togglePause();
@@ -510,9 +549,8 @@ addEventListener("blur", () => { for (const k in keys) keys[k] = false; input.ju
 function pollInput() {
   input.left  = !!(keys.ArrowLeft  || keys.KeyA) || touchState.left;
   input.right = !!(keys.ArrowRight || keys.KeyD) || touchState.right;
-  input.down  = !!(keys.ArrowDown  || keys.KeyS) || touchState.down;
 }
-const touchState = { left:false, right:false, down:false };
+const touchState = { left:false, right:false };
 /* Don't trust a one-shot sniff -- iPadOS Safari defaults to "Request Desktop
    Website", where `ontouchstart` is false. Guess up front, but the real trigger
    is the first actual touch, and we remember it for next time. */
@@ -534,7 +572,6 @@ function bindTouch(el, on, off) {
 }
 bindTouch(document.getElementById("tcLeft"),  () => touchState.left = true,  () => touchState.left = false);
 bindTouch(document.getElementById("tcRight"), () => touchState.right = true, () => touchState.right = false);
-bindTouch(document.getElementById("tcDown"),  () => touchState.down = true,  () => touchState.down = false);
 bindTouch(document.getElementById("tcJump"),  () => setJump(true),           () => setJump(false));
 
 /* ==========================================================================
@@ -684,7 +721,19 @@ const TEMPLATES = [
 { tier:3, rows:[  // a proper hill -- slide the whole way down
 "................","................","................","................",
 "................",".......ooo......","......>##<......",".....>####<.....",
-"....>######<....","...>########<...","..>##########<6.","################"]}
+"....>######<....","...>########<...","..>##########<6.","################"]},
+{ tier:0, rows:[  // gentle trampoline -- bounce into a calm cloud break
+"................","................","................","................",
+"................","................","................","................",
+"......ooo.......","................",".......T........","################"]},
+{ tier:2, rows:[  // a little trampoline plaza
+"................","................","................","..ooo......ooo..",
+"................","................","................","................",
+"................","................","..T..........T..","################"]},
+{ tier:1, rows:[  // trampoline tucked past a brick shelf
+"................","................","................","................",
+"................","................",".......ooo......","......XXX.......",
+"................","................","....T...........","################"]}
 ];
 
 /* ------------------------------ world state ----------------------------- */
@@ -729,6 +778,8 @@ function buildChunk(index) {
           world.hazards.push({ x:wx + TILE/2, y:wy + TILE - 17, kind:ch, t:Math.random()*6 }); break;
         case "X": world.movers.push({ kind:"X", ci:index, row:r, col:c,
                     x:wx + TILE/2, y:wy + TILE/2, hits:0, shake:0 }); break;
+        case "T": world.movers.push({ kind:"T", x:wx + TILE/2, y:wy + TILE - 15,
+                    squish:0, spent:0, t:Math.random()*6 }); break;
         case "=": world.movers.push({ kind:"P", ci:index, row:r, col:c,
                     x:wx + TILE/2, y:wy + TILE/2, state:"solid", timer:0, fy:0, vy:0 }); break;
         case "?": world.hazards.push({ x:wx + TILE/2, y:wy + TILE - 17,
@@ -795,6 +846,12 @@ function tileAtPx(px, py) {
   if (!t) return ".";
   return t[row][col - ci * COLS] || ".";
 }
+function equippedPower() {
+  if (!save.equipped) return null;
+  const def = byId(save.equipped);
+  return def ? def.power || null : null;
+}
+
 const isSolidPx = (px, py) => {
   const c = tileAtPx(px, py);
   return c === "#" || c === "C" || c === "=" || c === "X";
@@ -818,7 +875,8 @@ function setTile(ci, row, col, ch) {
 }
 
 /* Axis-separated AABB vs tile collision. Returns what it bumped into. */
-function moveBody(b, dt) {
+function moveBody(b, dt, stepUp) {
+  stepUp = stepUp === undefined ? STEP_UP : stepUp;
   const res = { ground:false, ceil:false, wall:false };
   const wasGround = !!b.onGround;
   // --- horizontal ---
@@ -843,7 +901,7 @@ function moveBody(b, dt) {
       const clear = !isSolidPx(edge, blockTop - 6) &&
                     !isSolidPx(edge, blockTop - b.h + 4) &&
                     !isSolidPx(b.x + b.w / 2, blockTop - b.h + 4);
-      if (wasGround && rise > 0 && rise <= STEP_UP && clear) {
+      if (wasGround && rise > 0 && rise <= stepUp && clear) {
         b.y = blockTop - b.h - 0.01;      // just walk up over the lip
         if (b.vy > 0) b.vy = 0;
         res.ground = true;
@@ -900,8 +958,9 @@ function moveBody(b, dt) {
 const game   = { state:"hub", t:0, shake:0, hatch:null };
 const player = { x:100, y:455, w:30, h:40, vx:0, vy:0, prevY:455, onGround:false,
                  face:1, coyote:0, buffer:0, iframes:0, hearts:3, anim:0, squash:0, combo:0, airJumps:1, star:0,
-                 slide:false, slopeDir:0, lastSlope:0, slopeGrace:0, slideSfx:0, runT:0, runDir:0 };
-const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, over:false, endT:0, rainbow:null };
+                 slide:false, slopeDir:0, lastSlope:0, slopeGrace:0, slideSfx:0, runT:0, runDir:0,
+                 power:null, flyFuel:FLY_TIME, flying:false };
+const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, over:false, endT:0, rainbow:null, cloud:null };
 const trail  = [];   // breadcrumb positions so the companion squishy can follow
 
 function startRun() {
@@ -912,9 +971,10 @@ function startRun() {
   player.iframes = 0; player.hearts = 3; player.anim = 0; player.squash = 0; player.combo = 0; player.airJumps = 1; player.star = 0;
   player.slide = false; player.slopeDir = 0; player.lastSlope = 0;
   player.slopeGrace = 0; player.slideSfx = 0; player.runT = 0; player.runDir = 0;
+  player.power = equippedPower(); player.flyFuel = FLY_TIME; player.flying = false;
   run.money = run.coins = run.stomps = run.dist = 0;
   run.maxX = 100; run.wallX = -420; run.camX = 0; run.over = false; run.endT = 0;
-  run.rainbow = null;
+  run.rainbow = null; run.cloud = null;
   trail.length = 0;
   game.state = "play"; game.shake = 0;
   showMenu(null);
@@ -1126,8 +1186,94 @@ function updateRainbow(dt) {
   if (R.t >= RAINBOW_TIME) endRainbow();
 }
 
+/* a gentle, mostly-flat drift -- much calmer than the rainbow's big curve */
+const cloudY = wx => 250 + Math.sin(wx * 0.0009) * 60 + Math.sin(wx * 0.0021) * 22;
+
+function startCloudRide(cx, cy) {
+  run.cloud = { t: 0, cy: player.y, vy: -420, coins: [], got: 0, launch: 0.4 };
+  for (let i = 0; i < 26; i++) {
+    const x = player.x + 420 + i * 100;
+    run.cloud.coins.push({ x, y: cloudY(x), got: false });
+  }
+  game.shake = 8;
+  burst(cx, cy - 10, "#ffffff", 16, 220);
+  burst(cx, cy - 10, "#dff0ff", 10, 170);
+  S.boing();
+  MUSIC.setMode("cloud");
+}
+
+function endCloudRide() {
+  let col = Math.floor(player.x / TILE);
+  for (let i = 0; i < 300; i++) {
+    const px = (col + i) * TILE + TILE/2;
+    if (isSolidPx(px, (ROWS - 1) * TILE + 4)) { player.x = px - player.w/2; break; }
+  }
+  player.y = (ROWS - 1) * TILE - player.h - 160;
+  player.vx = 0; player.vy = 0; player.onGround = false;
+  player.airJumps = 1; player.iframes = 0.7;
+  run.wallX = player.x - WALL_LEASH + 60;
+  run.cloud = null;
+  MUSIC.setMode(player.star > 0 ? "star" : "run");
+}
+
+function updateCloud(dt) {
+  const R = run.cloud;
+  pollInput();
+  R.t += dt;
+  game.shake *= Math.pow(0.0016, dt);
+
+  if (R.launch > 0) {
+    R.launch -= dt;
+    R.vy += 700 * dt;
+    R.cy += R.vy * dt;
+    if (R.launch <= 0) R.cy = Math.max(90, Math.min(H - 90, R.cy));
+  } else {
+    R.vy += (input.jumpHeld ? -CLOUD_LIFT : CLOUD_FALL) * dt;
+    R.vy = Math.max(-CLOUD_VMAX, Math.min(CLOUD_VMAX, R.vy));
+    R.cy += R.vy * dt;
+    if (R.cy < 70)     { R.cy = 70;     R.vy = Math.max(R.vy, 0); }
+    if (R.cy > H - 76) { R.cy = H - 76; R.vy = Math.min(R.vy, 0); }
+  }
+
+  player.x += CLOUD_SPEED * dt;
+  player.anim += dt * 4;
+  run.maxX = Math.max(run.maxX, player.x);
+  run.dist = Math.max(0, Math.floor((run.maxX - 100) / TILE));
+  while ((player.x + 3 * CHUNK_W) > (world.built + 1) * CHUNK_W) buildChunk(world.built + 1);
+
+  for (const c of R.coins) {
+    if (c.got) continue;
+    if (Math.abs(c.x - player.x) < 34 && Math.abs(c.y - R.cy) < 36) {
+      c.got = true; R.got++; run.coins++; run.money += CLOUD_COIN;
+      S.coin();
+      burst(c.x, c.y, "#dff0ff", 8, 140);
+      floatText(c.x, c.y - 14, "+" + CLOUD_COIN, "#eaf6ff");
+    }
+  }
+  if (Math.random() < 0.4) {
+    world.parts.push({ x: player.x - 12, y: R.cy + (Math.random() - 0.5) * 18,
+      vx: -70 - Math.random() * 40, vy: (Math.random() - 0.5) * 30, life: 0, max: 0.7,
+      color: "#ffffff", size: 3.6 });
+  }
+  for (let i = world.parts.length - 1; i >= 0; i--) {
+    const p = world.parts[i];
+    p.life += dt;
+    if (p.life >= p.max) { world.parts.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+  }
+  for (let i = world.texts.length - 1; i >= 0; i--) {
+    const tx = world.texts[i]; tx.life += dt; tx.y -= 40 * dt;
+    if (tx.life >= tx.max) world.texts.splice(i, 1);
+  }
+
+  run.camX = player.x - 300;
+  syncHud();
+  if (R.t >= CLOUD_TIME) endCloudRide();
+}
+
 function updatePlay(dt) {
   if (run.rainbow) { updateRainbow(dt); return; }
+  if (run.cloud) { updateCloud(dt); return; }
   pollInput();
   game.shake *= Math.pow(0.0016, dt);
 
@@ -1139,7 +1285,8 @@ function updatePlay(dt) {
     if (dir !== 0 && dir === player.runDir) player.runT += dt;
     else { player.runT = 0; player.runDir = dir; }
     const wind = Math.max(0, Math.min(1, (player.runT - SPRINT_AFTER) / SPRINT_RAMP));
-    const topSpeed = MAX_RUN + (SPRINT_RUN - MAX_RUN) * wind;
+    const speedMult = player.power === "speed" ? POWER_SPEED_MULT : 1;
+    const topSpeed = (MAX_RUN + (SPRINT_RUN - MAX_RUN) * wind) * speedMult;
 
     /* Sliding: crouch on a slope and gravity does the rest.
        A hill is built from ramp tiles with flat filler between them, so the
@@ -1150,9 +1297,12 @@ function updatePlay(dt) {
     else player.slopeGrace = Math.max(0, player.slopeGrace - dt);
     const onSlope = player.slopeDir !== 0 || player.slopeGrace > 0;
 
-    player.slide = input.down && player.onGround && onSlope && !run.over;
+    const downhill = player.slopeDir !== 0 ? player.slopeDir : player.lastSlope;
+    // automatic: sliding happens unless you actively press the uphill
+    // direction to climb instead. Standing still on a slope slides too.
+    const fightingIt = dir !== 0 && downhill !== 0 && dir === -downhill;
+    player.slide = player.onGround && onSlope && !run.over && !fightingIt && downhill !== 0;
     if (player.slide) {
-      const downhill = player.slopeDir !== 0 ? player.slopeDir : player.lastSlope;
       player.vx += downhill * SLIDE_ACCEL * dt;
       player.vx = Math.max(-SLIDE_MAX, Math.min(SLIDE_MAX, player.vx));
       if (downhill !== 0) player.face = downhill;
@@ -1174,20 +1324,37 @@ function updatePlay(dt) {
     /* ---- jump: coyote time + input buffering ---- */
     if (input.jumpPressed) { player.buffer = JUMP_BUFFER; input.jumpPressed = false; }
     player.buffer -= dt; player.coyote -= dt;
+    const jumpMult = player.power === "jump" ? POWER_JUMP_MULT : 1;
     if (player.buffer > 0 && player.coyote > 0) {
-      player.vy = -JUMP_V; player.buffer = 0; player.coyote = 0;
+      player.vy = -JUMP_V * jumpMult; player.buffer = 0; player.coyote = 0;
       player.onGround = false; player.squash = -0.35; S.jump();
     } else if (player.buffer > 0 && player.airJumps > 0 && !player.onGround) {
       // the double bounce -- a second, slightly smaller jump in mid-air
       player.airJumps--; player.buffer = 0;
-      player.vy = -JUMP_V * DOUBLE_V; player.squash = -0.45;
+      player.vy = -JUMP_V * DOUBLE_V * jumpMult; player.squash = -0.45;
       S.double();
       puffRing(player.x + player.w/2, player.y + player.h);
     }
     if (player.vy < 0 && !input.jumpHeld) player.vy *= Math.pow(JUMP_CUT, dt * 60 / 8);
 
+    player.flying = false;
+    if (player.power === "fly" && !player.onGround && input.jumpHeld && player.flyFuel > 0) {
+      player.vy = Math.max(player.vy - FLY_LIFT * dt, -FLY_VMAX);
+      // the camera never scrolls vertically -- keep flight on screen
+      if (player.y < 24) { player.y = 24; player.vy = Math.max(player.vy, 0); }
+      player.flyFuel = Math.max(0, player.flyFuel - dt);
+      player.flying = true;
+      if (Math.random() < 0.6) {
+        world.parts.push({ x: player.x + player.w/2 - player.face * 10, y: player.y + player.h * 0.6,
+          vx: -player.face * (40 + Math.random() * 50), vy: 60 + Math.random() * 50,
+          life: 0, max: 0.4, color: ["#ffe8f8","#d8b8ff","#fff"][(Math.random()*3)|0], size: 3 });
+      }
+    }
+
     player.prevY = player.y;
-    const hit = moveBody(player, dt);
+    const power = equippedPower();
+    player.power = power;
+    const hit = moveBody(player, dt, power === "big" ? STEP_UP * POWER_BIG_STEP : STEP_UP);
     player.slopeDir = hit.slope || 0;
     if (hit.ceil) {
       const hy = player.y - 5;
@@ -1197,6 +1364,7 @@ function updatePlay(dt) {
     if (hit.ground) {
       if (!player.onGround) { player.squash = 0.45; S.land(); }
       player.onGround = true; player.coyote = COYOTE; player.combo = 0; player.airJumps = 1;
+      if (player.power === "fly") player.flyFuel = FLY_TIME;
     } else {
       if (player.onGround) player.coyote = COYOTE;   // just walked off a ledge
       player.onGround = false;
@@ -1368,9 +1536,19 @@ function updatePlay(dt) {
     } else if (m.kind === "Z") {
       m.phase += dt * 2.5;
       m.y = m.y0 - Math.abs(Math.sin(m.phase)) * 118;
+    } else if (m.kind === "T") {
+      m.squish = Math.max(0, m.squish - dt * 3.2);
+      if (m.spent > 0) m.spent -= dt;
+      if (!run.over && !run.cloud && m.spent <= 0 && player.vy > 60 &&
+          Math.abs((player.x + player.w/2) - m.x) < 26 &&
+          (player.y + player.h) > m.y - 10 && (player.y + player.h) < m.y + 18) {
+        m.squish = 1; m.spent = 1.2;
+        startCloudRide(m.x, m.y);
+      }
+      continue;
     }
     if (run.over || player.star > 0) continue;
-    if (m.kind === "P" || m.kind === "X") continue;     // terrain, not spikes
+    if (m.kind === "P" || m.kind === "X" || m.kind === "T") continue;  // terrain / triggers, not spikes
     const gone = (m.kind === "F" || m.kind === "W") && m.state === "gone";
     if (!gone && Math.abs((player.x + player.w/2) - m.x) < 25 &&
         Math.abs((player.y + player.h/2) - m.y) < 27) hurt();
@@ -1422,12 +1600,20 @@ function updatePlay(dt) {
 
 const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
+const POWER_ICON = { speed:"👟", jump:"🌻", big:"🧀", fly:"🎀" };
 function syncHud() {
   const h = Math.max(0, player.hearts);
   document.getElementById("hearts").textContent =
     (player.star > 0 ? "⭐ " : "") + "💗".repeat(h) + "🤍".repeat(Math.max(0, 3 - h));
   document.getElementById("hudMoney").textContent = run.money;
   document.getElementById("hudDist").textContent = run.dist;
+  const pill = document.getElementById("powerPill");
+  if (player.power) {
+    pill.style.display = "flex";
+    document.getElementById("powerIcon").textContent = POWER_ICON[player.power] || "✨";
+    document.getElementById("powerLabel").textContent =
+      player.power === "fly" ? "Fly " + Math.ceil(player.flyFuel) + "s" : "";
+  } else pill.style.display = "none";
 }
 
 /* ==========================================================================
@@ -1747,6 +1933,23 @@ function drawMover(m, camX, t) {
     ctx.strokeStyle = "#c98f28"; ctx.lineWidth = 2.4;
     ctx.beginPath(); ctx.arc(0, 0, 19, 0, 7); ctx.stroke();
     ctx.restore();
+  } else if (m.kind === "T") {
+    const squish = m.squish;
+    ctx.fillStyle = "rgba(60,45,75,.14)";
+    ctx.beginPath(); ctx.ellipse(x, m.y + 20, 24, 5, 0, 0, 7); ctx.fill();
+    ctx.save(); ctx.translate(x, m.y);
+    ctx.scale(1 + squish * 0.28, 1 - squish * 0.4);
+    ctx.strokeStyle = "#e0a84f"; ctx.lineWidth = 3;
+    for (const sx of [-19, -9, 0, 9, 19]) { ctx.beginPath(); ctx.moveTo(sx, 6); ctx.lineTo(sx * 0.7, 16); ctx.stroke(); }
+    const tg = ctx.createRadialGradient(0, -4, 2, 0, 0, 26);
+    tg.addColorStop(0, "#bfe9ff"); tg.addColorStop(1, "#8fcdf0");
+    ctx.fillStyle = tg;
+    ctx.beginPath(); ctx.ellipse(0, 0, 24, 12, 0, 0, 7); ctx.fill();
+    ctx.strokeStyle = "#e0a84f"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(0, 0, 24, 12, 0, 0, 7); ctx.stroke();
+    eyes(0, -1, 20, 0, Math.sin(t * 1.8 + m.t) > 0.94, "#3a6a8a");
+    blush(0, -1, 12, "rgba(255,160,190,.4)");
+    ctx.restore();
   } else if (m.kind === "Z") {
     // bouncing strawberry
     const squash = Math.abs(Math.sin(m.phase)) < 0.12 ? 0.28 : 0;
@@ -1872,6 +2075,19 @@ function drawDumplingHero(cx, footY, scale, t, opts) {
   ctx.save(); ctx.translate(cx, cy); ctx.scale(face, 1);
   if (slide) ctx.rotate(-0.22);
 
+  if (o.cape) {
+    const flap = (air ? 0.5 : 0.15) + Math.sin(t * (o.flying ? 10 : 4)) * (o.flying ? 0.35 : 0.12);
+    const cg = ctx.createLinearGradient(-w * 0.1, -h * 0.1, -w * 0.1, h * 0.5);
+    cg.addColorStop(0, "#ffb3e0"); cg.addColorStop(1, "#c79bff");
+    ctx.fillStyle = cg;
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.28, -h * 0.28);
+    ctx.quadraticCurveTo(-w * (0.55 + flap * 0.3), h * 0.05, -w * (0.4 + flap * 0.4), h * 0.5);
+    ctx.quadraticCurveTo(-w * 0.15, h * 0.32, -w * 0.05, -h * 0.1);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "rgba(120,70,140,.35)"; ctx.lineWidth = 1.4 * scale; ctx.stroke();
+  }
+
   // legs -- tucked forward when sliding
   ctx.strokeStyle = "#e8a889"; ctx.lineWidth = 6.5 * scale; ctx.lineCap = "round";
   const legY = h * 0.42, legLen = 13 * scale;
@@ -1946,6 +2162,18 @@ function drawDumplingHero(cx, footY, scale, t, opts) {
 
 function drawPlayer(camX, t) {
   if (player.iframes > 0 && Math.floor(player.iframes * 22) % 2 === 0) return;
+  const powerScale = player.power === "big" ? POWER_BIG_SCALE : 1;
+  const powerOpts = { cape: player.power === "fly", flying: player.flying };
+  if (player.flying) {
+    // a little updraft of sparkle so flight reads even mid-frame
+    ctx.save(); ctx.globalAlpha = 0.5;
+    for (let i = 0; i < 3; i++) {
+      const yy = player.y + player.h + 6 + i * 9 + Math.sin(t * 8 + i) * 3;
+      ctx.strokeStyle = "#d8b8ff"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(player.x + player.w/2 - camX - 6, yy); ctx.lineTo(player.x + player.w/2 - camX + 6, yy); ctx.stroke();
+    }
+    ctx.restore();
+  }
   if (player.star > 0) {
     // rainbow shimmer, and it blinks faster as the star runs out
     const fading = player.star < 2 && Math.floor(player.star * 9) % 2 === 0;
@@ -1957,9 +2185,9 @@ function drawPlayer(camX, t) {
     glow.addColorStop(0, "rgba(255,246,178,.6)"); glow.addColorStop(1, "rgba(255,246,178,0)");
     ctx.fillStyle = glow;
     ctx.beginPath(); ctx.arc(player.x + player.w/2 - camX, player.y + player.h/2, 46, 0, 7); ctx.fill();
-    drawDumplingHero(player.x + player.w/2 - camX, player.y + player.h, 1, t, {
+    drawDumplingHero(player.x + player.w/2 - camX, player.y + player.h, powerScale, t, Object.assign({
       run: player.anim, air: player.onGround ? 0 : 1, squash: player.squash,
-      face: player.face, slide: player.slide });
+      face: player.face, slide: player.slide }, powerOpts));
     // a cycling rainbow rim rather than a wash, so the face still reads
     ctx.globalCompositeOperation = "source-over";
     ctx.globalAlpha = fading ? 0.4 : 0.85;
@@ -1971,10 +2199,10 @@ function drawPlayer(camX, t) {
     ctx.restore();
     return;
   }
-  drawDumplingHero(player.x + player.w/2 - camX, player.y + player.h, 1, t, {
+  drawDumplingHero(player.x + player.w/2 - camX, player.y + player.h, powerScale, t, Object.assign({
     run: player.anim, air: player.onGround ? 0 : 1, squash: player.squash,
     face: player.face, slide: player.slide
-  });
+  }, powerOpts));
 }
 
 /* ----------------------------- the squish wall --------------------------- */
@@ -2099,6 +2327,91 @@ function drawSquishy(c, cx, cy, s, def, t) {
         i ? c.lineTo(Math.cos(a) * r, Math.sin(a) * r) : c.moveTo(Math.cos(a) * r, Math.sin(a) * r);
       }
       c.closePath(); P(); break;
+    case "peach":
+      c.beginPath();
+      c.arc(-s * 0.02, -s * 0.05, s * 0.5, 0.15, Math.PI * 2 - 0.15);
+      c.closePath(); P();
+      c.strokeStyle = "rgba(200,90,80,.5)"; c.lineWidth = s * 0.045; c.beginPath();
+      c.moveTo(0, -s * 0.42); c.quadraticCurveTo(s * 0.06, -s * 0.02, 0, s * 0.42); c.stroke();
+      c.fillStyle = "#7fae4a";
+      c.beginPath(); c.ellipse(s * 0.04, -s * 0.52, s * 0.1, s * 0.2, -0.3, 0, 7); c.fill();
+      break;
+    case "tomato":
+      c.beginPath(); c.arc(0, s * 0.06, s * 0.78, 0, 7); P();
+      c.fillStyle = "#5f9c4a";
+      for (let i = 0; i < 5; i++) {
+        const a = -Math.PI / 2 + i * (Math.PI * 2 / 5);
+        c.save(); c.translate(0, -s * 0.5); c.rotate(a);
+        c.beginPath(); c.ellipse(0, 0, s * 0.09, s * 0.2, 0, 0, 7); c.fill();
+        c.restore();
+      }
+      c.fillStyle = "rgba(255,255,255,.4)";
+      c.beginPath(); c.ellipse(-s * 0.22, -s * 0.1, s * 0.16, s * 0.1, -0.4, 0, 7); c.fill();
+      break;
+    case "pickle":
+      c.save(); c.rotate(-0.12);
+      c.beginPath(); c.ellipse(0, 0, s * 0.42, s * 0.92, 0, 0, 7); P();
+      c.fillStyle = def.c2;
+      for (let i = -2; i <= 2; i++) { c.beginPath(); c.arc(s * 0.1 * i, i * s * 0.28, s * 0.05, 0, 7); c.fill(); }
+      c.restore();
+      break;
+    case "sloth":
+      c.beginPath(); c.arc(0, s * 0.06, s * 0.78, 0, 7); P();
+      c.fillStyle = def.c2; c.globalAlpha = 0.55;
+      c.beginPath(); c.ellipse(0, s * 0.18, s * 0.42, s * 0.36, 0, 0, 7); c.fill();
+      c.globalAlpha = 1;
+      c.fillStyle = def.c1;
+      for (const sx of [-1, 1]) { c.beginPath(); c.arc(sx * s * 0.52, -s * 0.5, s * 0.18, 0, 7); c.fill(); c.stroke(); }
+      break;
+    case "bunny":
+      c.beginPath(); c.arc(0, s * 0.14, s * 0.68, 0, 7); P();
+      for (const sx of [-1, 1]) {
+        c.save(); c.translate(sx * s * 0.26, -s * 0.5); c.rotate(sx * 0.14);
+        c.fillStyle = def.c1; c.beginPath(); c.ellipse(0, -s * 0.32, s * 0.15, s * 0.42, 0, 0, 7); c.fill(); c.stroke();
+        c.fillStyle = def.c2; c.beginPath(); c.ellipse(0, -s * 0.32, s * 0.08, s * 0.28, 0, 0, 7); c.fill();
+        c.restore();
+      }
+      break;
+    case "flower":
+      c.fillStyle = def.c1;
+      for (let i = 0; i < 8; i++) {
+        const a = i * Math.PI / 4;
+        c.save(); c.rotate(a);
+        c.beginPath(); c.ellipse(0, -s * 0.62, s * 0.2, s * 0.32, 0, 0, 7); c.fill();
+        c.restore();
+      }
+      c.strokeStyle = def.c1; c.lineWidth = s * 0.05;
+      c.fillStyle = def.c2;
+      c.beginPath(); c.arc(0, 0, s * 0.44, 0, 7); c.fill(); c.stroke();
+      c.fillStyle = "rgba(0,0,0,.15)";
+      for (let i = 0; i < 10; i++) {
+        const a = i * 0.63, r = s * 0.14 + (i % 3) * s * 0.07;
+        c.beginPath(); c.arc(Math.cos(a) * r, Math.sin(a) * r, s * 0.03, 0, 7); c.fill();
+      }
+      break;
+    case "cheeseblock":
+      c.beginPath(); c.roundRect(-s * 0.72, -s * 0.58, s * 1.44, s * 1.16, s * 0.16); P();
+      c.fillStyle = def.c2;
+      for (const [hx, hy, hr] of [[-0.34, -0.18, 0.15], [0.28, 0.22, 0.19], [0.05, -0.32, 0.11], [0.4, -0.15, 0.09]]) {
+        c.beginPath(); c.arc(hx * s, hy * s, hr * s, 0, 7); c.fill();
+      }
+      c.fillStyle = "rgba(255,255,255,.5)";
+      c.beginPath(); c.roundRect(-s * 0.55, -s * 0.42, s * 0.75, s * 0.2, s * 0.1); c.fill();
+      break;
+    case "mango":
+      c.save(); c.rotate(0.18);
+      c.beginPath();
+      c.moveTo(0, -s * 0.85); c.quadraticCurveTo(s * 0.72, -s * 0.5, s * 0.55, s * 0.15);
+      c.quadraticCurveTo(s * 0.3, s * 0.85, -s * 0.12, s * 0.7);
+      c.quadraticCurveTo(-s * 0.55, s * 0.4, -s * 0.35, -s * 0.35);
+      c.quadraticCurveTo(-s * 0.2, -s * 0.72, 0, -s * 0.85);
+      c.closePath(); P();
+      c.fillStyle = "rgba(255,255,255,.4)";
+      c.beginPath(); c.ellipse(-s * 0.1, -s * 0.2, s * 0.14, s * 0.28, -0.3, 0, 7); c.fill();
+      c.fillStyle = "#5f9c4a";
+      c.beginPath(); c.ellipse(0, -s * 0.84, s * 0.07, s * 0.13, 0, 0, 7); c.fill();
+      c.restore();
+      break;
   }
   if (def.stars) {
     c.fillStyle = "rgba(255,255,255,.9)";
@@ -2258,8 +2571,87 @@ function renderRainbow(t) {
   }
 }
 
+function renderCloud(t) {
+  const R = run.cloud, camX = run.camX;
+
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#bfe4ff"); g.addColorStop(0.55, "#e2f4ff"); g.addColorStop(1, "#fdfaff");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = "rgba(255,246,214,.7)";
+  ctx.beginPath(); ctx.arc(W - 120, 90, 44, 0, 7); ctx.fill();
+
+  for (let i = 0; i < 10; i++) {
+    const cx2 = mod(i * 260 - camX * 0.25, W + 420) - 210;
+    const cy2 = 60 + (i * 97) % 300;
+    ctx.globalAlpha = 0.85;
+    puff(cx2, cy2, 44 + (i % 3) * 12, "#ffffff");
+    ctx.globalAlpha = 0.28; puff(cx2 + 6, cy2 + 6, 44 + (i % 3) * 12, "#cfe8ff");
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.save();
+  if (game.shake > 0.3) ctx.translate((Math.random() - 0.5) * game.shake, (Math.random() - 0.5) * game.shake);
+
+  drawParticles(camX);
+
+  for (const c of R.coins) {
+    if (c.got || c.x < camX - 40 || c.x > camX + W + 40) continue;
+    const x = c.x - camX, sw = Math.abs(Math.cos(t * 2.4 + c.x * 0.01));
+    ctx.save(); ctx.translate(x, c.y); ctx.scale(0.35 + sw * 0.65, 1);
+    ctx.fillStyle = "rgba(255,255,255,.5)";
+    ctx.beginPath(); ctx.arc(0, 0, 17, 0, 7); ctx.fill();
+    ctx.fillStyle = "#dff0ff"; ctx.beginPath(); ctx.arc(0, 0, 12, 0, 7); ctx.fill();
+    ctx.fillStyle = "#bfe0f5"; ctx.beginPath(); ctx.arc(0, 0, 9, 0, 7); ctx.fill();
+    ctx.fillStyle = "#7fb8dd"; ctx.font = "bold 12px ui-rounded,system-ui,sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("D", 0, 1);
+    ctx.restore();
+  }
+
+  const px = player.x - camX;
+  ctx.save();
+  ctx.translate(px, R.cy);
+  ctx.rotate(Math.max(-0.28, Math.min(0.28, R.vy / 1300)));
+  ctx.translate(-px, -R.cy);
+  const powerScale = player.power === "big" ? POWER_BIG_SCALE : 1;
+  drawDumplingHero(px, R.cy + 26, powerScale, t, Object.assign({
+    run: player.anim, air: 1, squash: 0, face: 1 },
+    { cape: player.power === "fly", flying: false }));
+  ctx.restore();
+
+  if (save.equipped) {
+    const def = byId(save.equipped);
+    if (def) drawSquishy(ctx, px - 50, R.cy + Math.sin(t * 3) * 7, 14, def, t);
+  }
+
+  ctx.font = "900 20px ui-rounded,system-ui,sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const tx of world.texts) {
+    ctx.globalAlpha = Math.max(0, 1 - tx.life / tx.max);
+    ctx.lineWidth = 4; ctx.strokeStyle = "rgba(70,110,140,.5)";
+    ctx.strokeText(tx.txt, tx.x - camX, tx.y);
+    ctx.fillStyle = tx.color; ctx.fillText(tx.txt, tx.x - camX, tx.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  const frac = Math.max(0, 1 - R.t / CLOUD_TIME);
+  const bw = W * 0.42, bx = (W - bw) / 2, by = H - 34;
+  ctx.fillStyle = "rgba(140,190,220,.3)"; rr(bx, by, bw, 12, 6); ctx.fill();
+  ctx.fillStyle = "#bfe4ff"; rr(bx, by, Math.max(4, bw * frac), 12, 6); ctx.fill();
+  ctx.fillStyle = "rgba(60,90,110,.8)";
+  ctx.font = "900 14px ui-rounded,system-ui,sans-serif"; ctx.textAlign = "center";
+  ctx.fillText("☁ Cloud Drift  " + R.got + " coins", W/2, by - 13);
+
+  if (R.t < 0.4) {
+    ctx.fillStyle = "rgba(255,255,255," + (1 - R.t / 0.4).toFixed(3) + ")";
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
 function renderPlay(t) {
   if (run.rainbow) { renderRainbow(t); return; }
+  if (run.cloud) { renderCloud(t); return; }
   const camX = run.camX;
   ctx.save();
   if (game.shake > 0.3) ctx.translate((Math.random() - 0.5) * game.shake, (Math.random() - 0.5) * game.shake);
@@ -2420,7 +2812,7 @@ function menuHelp() {
     <div class="tradeRow"><span>⭐ The glowing star</span><span>invincible for 8 seconds —<br>run straight through everything</span></div>
     <div class="tradeRow"><span>🥕 The glowing carrot</span><span>launches you onto a rainbow!<br>hold jump to fly up, let go to drop</span></div>
     <div class="tradeRow"><span>Grab over half the<br>rainbow coins</span><span>you get a heart back (up to 5)</span></div>
-    <div class="tradeRow"><span>⬇️ or S on a slope</span><span>slide down with your arms up!</span></div>
+    <div class="tradeRow"><span>Stand on a slope</span><span>you slide down automatically —<br>hold the uphill direction to climb instead</span></div>
     <div class="tradeRow"><span>Wooden planks</span><span>they wobble, then give way —<br>keep moving, they rebuild</span></div>
     <div class="tradeRow"><span>Brick blocks</span><span>headbutt them from below —<br>three whacks and they burst open</span></div>
     <div class="tradeRow"><span>🥕 Carrots</span><span>always up high now —<br>climb the platforms to reach them</span></div>
@@ -2438,33 +2830,37 @@ function menuBook() {
   const cells = SQUISHIES.map(s => {
     const n = save.counts[s.id] || 0;
     const eq = save.equipped === s.id;
+    const power = s.power ? `<div class="pw">${POWER_ICON[s.power]} ${n ? s.powerName : "?"}</div>` : "";
     return `<div class="cell ${n ? "have" : "locked"} ${eq ? "equipped" : ""}" data-act="${n ? "equip" : ""}" data-id="${s.id}">
       ${n ? `<canvas data-sq="${s.id}" data-size="54"></canvas>` : `<div style="width:54px;height:54px;display:grid;place-items:center;font-size:28px;font-weight:900;opacity:.22">?</div>`}
       <div class="nm">${n ? s.name : "???"}</div>
       <div class="rr" style="color:${RARITY_INK[s.r]}">${RARITY[s.r]}</div>
+      ${power}
       ${n > 1 ? `<div class="ct">x${n}</div>` : ""}
     </div>`;
   }).join("");
   return `<h2>Collection</h2>
-    <p class="sub">${distinctOwned()} of ${SQUISHIES.length} found — tap one you own to carry it with you</p>
+    <p class="sub">${distinctOwned()} of ${SQUISHIES.length} found — tap one you own to carry it with you<br>
+    ✨ Mythic squishies grant a superpower while equipped — only one at a time</p>
     <div class="grid">${cells}</div>
     <div class="btns"><button data-act="hub">Back</button></div>`;
 }
 
 function menuTrader() {
   let rows = "";
-  for (let t = 0; t < 3; t++) {
+  const topTier = RARITY.length - 1;
+  for (let t = 0; t < topTier; t++) {
     const d = dupesOfRarity(t);
     rows += `<div class="tradeRow">
       <span>3 spare <b style="color:${RARITY_INK[t]}">${RARITY[t]}</b> → 1 random <b style="color:${RARITY_INK[t+1]}">${RARITY[t+1]}</b><br>
       <span style="opacity:.6;font-weight:700">you have ${d} spare</span></span>
       <button class="small" data-act="trade" data-t="${t}" ${d < 3 ? "disabled" : ""}>Trade</button></div>`;
   }
-  const d3 = dupesOfRarity(3);
+  const dTop = dupesOfRarity(topTier);
   rows += `<div class="tradeRow">
-    <span>3 spare <b style="color:${RARITY_INK[3]}">Super Rare</b> → 500 🪙<br>
-    <span style="opacity:.6;font-weight:700">you have ${d3} spare</span></span>
-    <button class="small" data-act="trade" data-t="3" ${d3 < 3 ? "disabled" : ""}>Trade</button></div>`;
+    <span>3 spare <b style="color:${RARITY_INK[topTier]}">${RARITY[topTier]}</b> → 800 🪙<br>
+    <span style="opacity:.6;font-weight:700">you have ${dTop} spare</span></span>
+    <button class="small" data-act="trade" data-t="${topTier}" ${dTop < 3 ? "disabled" : ""}>Trade</button></div>`;
   const odds = eggDef().odds;
   return `<h2>🤝 Squishy Trader</h2>
     <p class="sub">"Spare squishies? I'll trade you up, friend."</p>
@@ -2600,7 +2996,7 @@ sheetEl.addEventListener("click", e => {
         const take = Math.min(spare, need);
         save.counts[s.id] -= take; need -= take;
       }
-      if (t === 3) { save.money += 500; persist(); showMenu(menuTrader()); S.coin(); }
+      if (t === RARITY.length - 1) { save.money += 800; persist(); showMenu(menuTrader()); S.coin(); }
       else {
         persist();
         game.state = "hatch";
@@ -2652,7 +3048,7 @@ function frame(now) {
 /* poke at the game from the browser console: __SE.save, __SE.player, etc. */
 window.__SE = { game, save, player, run, world, startRun, goHub, beginHatch, persist, MUSIC, SECTIONS,
                 rainbowY, startRainbow, endRainbow, buildChunk, resetWorld, grabStar, VERSION,
-                tileAtPx, isSolidPx, bumpBrick,
+                tileAtPx, isSolidPx, bumpBrick, cloudY, startCloudRide, endCloudRide, equippedPower,
                 SQUISHIES, EGGS, TEMPLATES, grant, input, reset(){ localStorage.removeItem(SAVE_KEY); location.reload(); } };
 
 /* first boot: the common egg from the spec, free, hatching on its own */

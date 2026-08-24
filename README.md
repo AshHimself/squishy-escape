@@ -30,8 +30,9 @@ and on an iPad (on-screen buttons appear the moment you touch the screen).
 | Space again in mid-air | **double bounce** — a second jump, slightly smaller |
 | Land on a 6 or a 7 | squash it for coins, and your double bounce comes back |
 | Hold jump on the rainbow | fly up — let go to drop |
-| ⬇️ or S on a slope | **slide** down it, arms in the air |
+| Stand on a slope | **slide** down it automatically, arms in the air —<br>hold the uphill direction instead if you want to climb |
 | Jump into a brick from below | crack it — 3 hits and it bursts |
+| Land on a trampoline | bounce into a calm cloud break |
 | ⭐ Star | invincible for 11 seconds |
 | P or Esc | pause |
 | M | mute |
@@ -65,10 +66,27 @@ bursts into rubble, worth a couple of coins, leaving a hole you can jump
 straight through. They're built to guard something — a carrot sits directly
 over some of them.
 
+## Rarities and superpowers
+
+There are now **five rarities**: Common, Uncommon, Rare, Super Rare, and
+**Mythic**. Every Mythic squishy carries a **superpower** — but it only works
+while that squishy is **equipped**, and only one can be equipped at a time (tap
+it in the Collection screen).
+
+| Squishy | Power | What it does |
+| --- | --- | --- |
+| 🐰 Bunny | Speedy Feet | Run and sprint noticeably faster |
+| 🌻 Sunflower | Big Bounce | Jump and double-bounce much higher |
+| 🧀 Cheese Block | Big Squish | Bigger dumpling, steps over taller ledges |
+| 🎗️ Glitter Dumplen | Cape Flight | Hold jump in the air to fly — about 10 seconds before you need to land and recharge |
+
+Equip one and the HUD shows a little pill with its icon — for Cape Flight, that
+pill counts down your remaining flight time. Land to refuel it.
+
 ## ⭐ The star
 
-A **glowing star** turns up every ten course pieces or so. Grab it and you're
-**invincible for eleven seconds**, exactly like the star in Super
+A **glowing star** turns up now and then. Grab it and you're **invincible for
+eleven seconds**, exactly like the star in Super
 Mario Bros: run straight through snacks, fidget rings and falling dumplings,
 and any 6-7 you touch just pops for coins — you don't even have to land on it.
 The dumpling glows with a cycling rainbow rim and the music switches to a fast
@@ -106,6 +124,18 @@ together, and about 60% of them are stars — so carrots work out at roughly one
 every seventeen pieces and stay a lucky find. `CARROT_COIN`, `RAINBOW_TIME`,
 `RAINBOW_SPEED`, `STAR_TIME` and `MAX_HEARTS` at the top of the file tune all
 of it.
+
+## 🧸 The trampoline
+
+A cute bouncy trampoline sits on the ground here and there, springs and all.
+Land on it — actually land, falling onto it — and it flings you way up into a
+**calm cloud bonus round**, no glowing pickup needed, just a good jump.
+
+The clouds are the carrot's gentler sibling: same shape (fly around, grab
+coins, land back on the course when it ends), but slower, drifts more, worth
+less per coin, and the music turns properly peaceful — soft, sparse, almost no
+drums. It's the chill option next to the rainbow's big flashy one. The squish
+wall waits for you here too.
 
 ## The music
 
@@ -164,6 +194,8 @@ of course: **12 rows of exactly 16 characters**.
     platform, so reaching it takes real jumping. Two per template max, or
     they stop feeling special.
  >  ramp climbing to the right     <  ramp dropping to the right
+ T  trampoline -- a physical object on the ground. Landing on it (falling
+    onto it, not just walking past) launches the calm cloud bonus round.
     Ramps are 45 degrees and one tile each, so a hill is a diagonal staircase
     of them. Every ramp needs a solid tile directly underneath it, or the
     dumpling falls straight through. `STEP_UP` is how tall a lip the dumpling
@@ -192,9 +224,15 @@ Three rules so the course stays possible:
 
 - `SQUISHIES` — the collection. Add one and it appears in the book automatically.
   `shape` picks how it's drawn (`dumpling`, `round`, `block`, `berry`, `banana`,
-  `cheese`, `paw`, `cloud`, `ring`, `star`), `r` is the rarity (0–3), and
-  `rainbow` / `stars` / `shine` are optional sparkle.
-- `EGGS` — each egg's hatch odds and what the next one costs.
+  `cheese`, `paw`, `cloud`, `ring`, `star`, `peach`, `pickle`, `tomato`,
+  `flower`, `sloth`, `bunny`, `cheeseblock`, `mango`), `r` is the rarity
+  (0–4, where 4 is Mythic), and `rainbow` / `stars` / `shine` are optional
+  sparkle. Give a Mythic squishy `power` (`speed` / `jump` / `big` / `fly`)
+  plus `powerName` and `powerDesc` to make it grant a superpower when equipped
+  — see the constants block for the multipliers each one uses.
+- `EGGS` — each egg's hatch odds (one number per rarity, five now) and what the
+  next egg costs. `RARITY` / `RARITY_BG` / `RARITY_INK` all need a matching
+  entry if you add another tier.
 - The constants at the top — `JUMP_V`, `MAX_RUN`, `GRAVITY`, `WALL_BASE`,
   `WALL_MAX` — control how it feels. Turn `WALL_BASE` down to make it kinder.
   `DOUBLE_V` is how strong the mid-air bounce is compared to a normal jump.
@@ -202,9 +240,19 @@ Three rules so the course stays possible:
   wind-up sprint goes, and `SLIDE_ACCEL` / `SLIDE_MAX` how fierce a slope
   slide is. `WOOD_SHAKE` and `WOOD_BACK` are the plank's warning wobble and
   how long it takes to rebuild. `BRICK_HITS` is how many headbutts a brick takes to burst.
+  `WALL_BASE` / `WALL_GAIN` / `WALL_MAX` control how fast the squish wall is.
+  `POWER_SPEED_MULT` / `POWER_JUMP_MULT` / `POWER_BIG_SCALE` / `FLY_TIME` /
+  `FLY_LIFT` are the four superpowers' strength.
 - `SECTIONS` — the music. Each entry is 16 sixteenth-notes: `lead` is a list of
   MIDI note numbers (`null` is a rest), `roots` is the bassline's four chords,
   and `kick` / `snare` / `hat` are patterns where `x` is a hit and `.` is a rest.
+
+### The economy
+
+Hatching stays cheap (25 🪙) so the early loop feels good fast. Egg upgrades
+get steep near the top on purpose — the jump from Legendary to the final
+**Mythic Egg** costs 4200, because Mythic squishies (and their superpowers)
+are meant to be a real chase, not a given.
 
 ### Poking at it while it runs
 
@@ -224,6 +272,12 @@ collection.
 
 The version is shown on the main menu, under the title.
 
+- **v1.6.0** — a fifth rarity (Mythic) with four equippable superpowers
+  (speed, higher jump, bigger size, cape flight); nine new squishies; a
+  trampoline that bounces you into a calm cloud bonus round with its own
+  peaceful music; sliding is now automatic (no down button — hold the uphill
+  direction to climb instead); a faster, harder squish wall; and a friendlier
+  hatch cost with a steeper climb toward the top egg.
 - **v1.5.0** — water and piranhas removed; destructible brick blocks (3 hits
   to burst); carrots now only spawn up on a climb, never at ground level.
 - **v1.4.1** — you can actually walk up the hills now, not just slide down them.
