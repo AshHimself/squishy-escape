@@ -165,7 +165,7 @@
 "use strict";
 
 /* ------------------------------ constants ------------------------------ */
-const VERSION = "1.6.0";           // major.minor.patch -- bump minor for features
+const VERSION = "1.7.0";           // major.minor.patch -- bump minor for features
 
 const W = 960, H = 540;            // virtual resolution
 const TILE = 45;                   // tile size
@@ -225,13 +225,11 @@ const SLIDE_MAX   = 540;
 const STEP_UP     = 24;
 /* brick blocks you can smash open from underneath */
 const BRICK_HITS  = 3;
-/* the trampoline and its calm cloud bonus */
-const CLOUD_TIME  = 9;
-const CLOUD_SPEED = 300;
-const CLOUD_LIFT  = 1350;
-const CLOUD_FALL  = 780;
-const CLOUD_VMAX  = 300;
-const CLOUD_COIN  = 2;
+/* the trampoline -- a much bigger version of a normal jump, not a separate
+   mode. You launch up near the clouds and land wherever gravity takes you,
+   still inside the ordinary run the whole time. */
+const TRAMPOLINE_BOUNCE = 1200;
+const TRAMPOLINE_MUSIC  = 2.2;  // roughly how long the peaceful duck lasts
 /* wooden platforms that give way */
 const WOOD_SHAKE  = 0.5;   // warning wobble before it drops
 const WOOD_BACK   = 3.2;   // and how long until it rebuilds itself
@@ -283,6 +281,14 @@ const S = {
   star:  () => [0, 60, 120, 180].forEach((d, i) =>
     setTimeout(() => sfx([784, 988, 1175, 1568][i], 0.22, "square", 0.07), d)),
   heart: () => [0, 110].forEach((d, i) => setTimeout(() => sfx([659, 880][i], 0.3, "triangle", 0.07), d)),
+  godMode: () => {
+    // an original chunky little riser + thump, in the spirit of a classic
+    // FPS power-up jingle -- not a sample of anything, just the same vibe
+    [0, 70, 140].forEach((d, i) => setTimeout(() =>
+      sfx([110, 110, 110][i], 0.16, "sawtooth", 0.09, 60), d));
+    setTimeout(() => sfx(55, 0.5, "square", 0.11, -20), 220);
+    setTimeout(() => { sfx(440, 0.35, "square", 0.08, 660); sfx(220, 0.35, "sawtooth", 0.07, 220); }, 230);
+  },
   boing: () => { sfx(360, 0.1, "sine", 0.06, 260); setTimeout(() => sfx(520, 0.14, "triangle", 0.055, 140), 60); },
   carrot:() => [0, 70, 140, 210, 300, 400].forEach((d, i) =>
     setTimeout(() => sfx([523, 659, 784, 1046, 1318, 1568][i], 0.3, "triangle", 0.075), d)),
@@ -493,11 +499,12 @@ const byId = id => SQUISHIES.find(s => s.id === id);
 
 // Egg tiers: nicer egg -> better odds. [Common, Uncommon, Rare, Super Rare]
 const EGGS = [
-  { name:"Common Egg",     odds:[74, 20, 4.7, 1.2, 0.1], upgrade:100  },
-  { name:"Uncommon Egg",   odds:[54, 32, 11,  2.6, 0.4], upgrade:300  },
-  { name:"Rare Egg",       odds:[34, 37, 21,  6.5, 1.5], upgrade:750  },
-  { name:"Super Rare Egg", odds:[17, 33, 32,  14,  4  ], upgrade:1700 },
-  { name:"Legendary Egg",  odds:[5,  23, 38,  26,  8  ], upgrade:4200 },
+  // upgrade costs are +30% on Annie's request (was 100/300/750/1700/4200)
+  { name:"Common Egg",     odds:[74, 20, 4.7, 1.2, 0.1], upgrade:130  },
+  { name:"Uncommon Egg",   odds:[54, 32, 11,  2.6, 0.4], upgrade:390  },
+  { name:"Rare Egg",       odds:[34, 37, 21,  6.5, 1.5], upgrade:975  },
+  { name:"Super Rare Egg", odds:[17, 33, 32,  14,  4  ], upgrade:2210 },
+  { name:"Legendary Egg",  odds:[5,  23, 38,  26,  8  ], upgrade:5460 },
   { name:"Mythic Egg",     odds:[2,  14, 30,  34,  20 ], upgrade:null }
 ];
 const HATCH_COST = 25;
@@ -531,6 +538,7 @@ function setJump(down) {
   if (down && !input.jumpHeld) input.jumpPressed = true;
   input.jumpHeld = down;
 }
+let cheatBuffer = "";
 addEventListener("keydown", e => {
   if (e.repeat) return;
   audioOn();
@@ -539,6 +547,11 @@ addEventListener("keydown", e => {
   if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") setJump(true);
   if (e.code === "KeyM") toggleMute();
   if ((e.code === "KeyP" || e.code === "Escape") && (game.state === "play" || game.state === "paused")) togglePause();
+  // a little Easter egg for the menu screen -- type IDFKA
+  if (game.state === "hub" && /^Key[A-Z]$/.test(e.code)) {
+    cheatBuffer = (cheatBuffer + e.code[3]).slice(-5);
+    if (cheatBuffer === "IDFKA") { cheatBuffer = ""; activateGodMode(); }
+  }
 });
 addEventListener("keyup", e => {
   keys[e.code] = false;
@@ -726,14 +739,14 @@ const TEMPLATES = [
 "................","................","................","................",
 "................","................","................","................",
 "......ooo.......","................",".......T........","################"]},
-{ tier:2, rows:[  // a little trampoline plaza
+{ tier:2, rows:[  // a trampoline plaza
 "................","................","................","..ooo......ooo..",
 "................","................","................","................",
-"................","................","..T..........T..","################"]},
-{ tier:1, rows:[  // trampoline tucked past a brick shelf
+"................","................","..T.............","################"]},
+{ tier:1, rows:[  // brick shelf, no trampoline this time
 "................","................","................","................",
 "................","................",".......ooo......","......XXX.......",
-"................","................","....T...........","################"]}
+"................","................","................","################"]}
 ];
 
 /* ------------------------------ world state ----------------------------- */
@@ -763,14 +776,21 @@ function pickTemplate(index) {
   return use[(Math.random() * use.length) | 0];
 }
 
+/* mirroring a ramp needs its direction swapped, everything else reads as-is */
+const mirrorChar = ch => ch === ">" ? "<" : ch === "<" ? ">" : ch;
+
 function buildChunk(index) {
   if (world.tiles.has(index)) return;
   const tpl = pickTemplate(index);
+  // stamping the same hand-built piece flipped left-right, at random, makes
+  // every template read as two different pieces for free -- ramps, patrols,
+  // coin arcs and drop timing all run the other way half the time.
+  const mirror = Math.random() < 0.5;
   const solid = [];
   for (let r = 0; r < ROWS; r++) {
     let line = "";
     for (let c = 0; c < COLS; c++) {
-      const ch = tpl.rows[r][c];
+      const ch = mirror ? mirrorChar(tpl.rows[r][COLS - 1 - c]) : tpl.rows[r][c];
       const wx = index * CHUNK_W + c * TILE, wy = r * TILE;
       switch (ch) {
         case "o": world.coins.push({ x:wx + TILE/2, y:wy + TILE/2, got:false, t:Math.random()*6 }); break;
@@ -959,8 +979,8 @@ const game   = { state:"hub", t:0, shake:0, hatch:null };
 const player = { x:100, y:455, w:30, h:40, vx:0, vy:0, prevY:455, onGround:false,
                  face:1, coyote:0, buffer:0, iframes:0, hearts:3, anim:0, squash:0, combo:0, airJumps:1, star:0,
                  slide:false, slopeDir:0, lastSlope:0, slopeGrace:0, slideSfx:0, runT:0, runDir:0,
-                 power:null, flyFuel:FLY_TIME, flying:false };
-const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, over:false, endT:0, rainbow:null, cloud:null };
+                 power:null, flyFuel:FLY_TIME, flying:false, cloudMusic:0 };
+const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, over:false, endT:0, rainbow:null };
 const trail  = [];   // breadcrumb positions so the companion squishy can follow
 
 function startRun() {
@@ -972,9 +992,10 @@ function startRun() {
   player.slide = false; player.slopeDir = 0; player.lastSlope = 0;
   player.slopeGrace = 0; player.slideSfx = 0; player.runT = 0; player.runDir = 0;
   player.power = equippedPower(); player.flyFuel = FLY_TIME; player.flying = false;
+  player.cloudMusic = 0;
   run.money = run.coins = run.stomps = run.dist = 0;
   run.maxX = 100; run.wallX = -420; run.camX = 0; run.over = false; run.endT = 0;
-  run.rainbow = null; run.cloud = null;
+  run.rainbow = null;
   trail.length = 0;
   game.state = "play"; game.shake = 0;
   showMenu(null);
@@ -1186,94 +1207,8 @@ function updateRainbow(dt) {
   if (R.t >= RAINBOW_TIME) endRainbow();
 }
 
-/* a gentle, mostly-flat drift -- much calmer than the rainbow's big curve */
-const cloudY = wx => 250 + Math.sin(wx * 0.0009) * 60 + Math.sin(wx * 0.0021) * 22;
-
-function startCloudRide(cx, cy) {
-  run.cloud = { t: 0, cy: player.y, vy: -420, coins: [], got: 0, launch: 0.4 };
-  for (let i = 0; i < 26; i++) {
-    const x = player.x + 420 + i * 100;
-    run.cloud.coins.push({ x, y: cloudY(x), got: false });
-  }
-  game.shake = 8;
-  burst(cx, cy - 10, "#ffffff", 16, 220);
-  burst(cx, cy - 10, "#dff0ff", 10, 170);
-  S.boing();
-  MUSIC.setMode("cloud");
-}
-
-function endCloudRide() {
-  let col = Math.floor(player.x / TILE);
-  for (let i = 0; i < 300; i++) {
-    const px = (col + i) * TILE + TILE/2;
-    if (isSolidPx(px, (ROWS - 1) * TILE + 4)) { player.x = px - player.w/2; break; }
-  }
-  player.y = (ROWS - 1) * TILE - player.h - 160;
-  player.vx = 0; player.vy = 0; player.onGround = false;
-  player.airJumps = 1; player.iframes = 0.7;
-  run.wallX = player.x - WALL_LEASH + 60;
-  run.cloud = null;
-  MUSIC.setMode(player.star > 0 ? "star" : "run");
-}
-
-function updateCloud(dt) {
-  const R = run.cloud;
-  pollInput();
-  R.t += dt;
-  game.shake *= Math.pow(0.0016, dt);
-
-  if (R.launch > 0) {
-    R.launch -= dt;
-    R.vy += 700 * dt;
-    R.cy += R.vy * dt;
-    if (R.launch <= 0) R.cy = Math.max(90, Math.min(H - 90, R.cy));
-  } else {
-    R.vy += (input.jumpHeld ? -CLOUD_LIFT : CLOUD_FALL) * dt;
-    R.vy = Math.max(-CLOUD_VMAX, Math.min(CLOUD_VMAX, R.vy));
-    R.cy += R.vy * dt;
-    if (R.cy < 70)     { R.cy = 70;     R.vy = Math.max(R.vy, 0); }
-    if (R.cy > H - 76) { R.cy = H - 76; R.vy = Math.min(R.vy, 0); }
-  }
-
-  player.x += CLOUD_SPEED * dt;
-  player.anim += dt * 4;
-  run.maxX = Math.max(run.maxX, player.x);
-  run.dist = Math.max(0, Math.floor((run.maxX - 100) / TILE));
-  while ((player.x + 3 * CHUNK_W) > (world.built + 1) * CHUNK_W) buildChunk(world.built + 1);
-
-  for (const c of R.coins) {
-    if (c.got) continue;
-    if (Math.abs(c.x - player.x) < 34 && Math.abs(c.y - R.cy) < 36) {
-      c.got = true; R.got++; run.coins++; run.money += CLOUD_COIN;
-      S.coin();
-      burst(c.x, c.y, "#dff0ff", 8, 140);
-      floatText(c.x, c.y - 14, "+" + CLOUD_COIN, "#eaf6ff");
-    }
-  }
-  if (Math.random() < 0.4) {
-    world.parts.push({ x: player.x - 12, y: R.cy + (Math.random() - 0.5) * 18,
-      vx: -70 - Math.random() * 40, vy: (Math.random() - 0.5) * 30, life: 0, max: 0.7,
-      color: "#ffffff", size: 3.6 });
-  }
-  for (let i = world.parts.length - 1; i >= 0; i--) {
-    const p = world.parts[i];
-    p.life += dt;
-    if (p.life >= p.max) { world.parts.splice(i, 1); continue; }
-    p.x += p.vx * dt; p.y += p.vy * dt;
-  }
-  for (let i = world.texts.length - 1; i >= 0; i--) {
-    const tx = world.texts[i]; tx.life += dt; tx.y -= 40 * dt;
-    if (tx.life >= tx.max) world.texts.splice(i, 1);
-  }
-
-  run.camX = player.x - 300;
-  syncHud();
-  if (R.t >= CLOUD_TIME) endCloudRide();
-}
-
 function updatePlay(dt) {
   if (run.rainbow) { updateRainbow(dt); return; }
-  if (run.cloud) { updateCloud(dt); return; }
   pollInput();
   game.shake *= Math.pow(0.0016, dt);
 
@@ -1335,7 +1270,10 @@ function updatePlay(dt) {
       S.double();
       puffRing(player.x + player.w/2, player.y + player.h);
     }
-    if (player.vy < 0 && !input.jumpHeld) player.vy *= Math.pow(JUMP_CUT, dt * 60 / 8);
+    // a trampoline bounce is involuntary -- it isn't cut short by not holding jump
+    if (player.vy < 0 && !input.jumpHeld && player.cloudMusic <= 0) {
+      player.vy *= Math.pow(JUMP_CUT, dt * 60 / 8);
+    }
 
     player.flying = false;
     if (player.power === "fly" && !player.onGround && input.jumpHeld && player.flyFuel > 0) {
@@ -1373,6 +1311,13 @@ function updatePlay(dt) {
     if (player.y > H + 120) respawnFromPit();
 
     player.iframes = Math.max(0, player.iframes - dt);
+    if (player.cloudMusic > 0) {
+      player.cloudMusic -= dt;
+      if (player.cloudMusic <= 0 || player.onGround) {
+        player.cloudMusic = 0;
+        MUSIC.setMode(player.star > 0 ? "star" : "run");
+      }
+    }
     if (player.star > 0) {
       player.star -= dt;
       if (Math.random() < 0.55) {
@@ -1539,11 +1484,19 @@ function updatePlay(dt) {
     } else if (m.kind === "T") {
       m.squish = Math.max(0, m.squish - dt * 3.2);
       if (m.spent > 0) m.spent -= dt;
-      if (!run.over && !run.cloud && m.spent <= 0 && player.vy > 60 &&
+      if (!run.over && m.spent <= 0 && player.vy > 60 &&
           Math.abs((player.x + player.w/2) - m.x) < 26 &&
           (player.y + player.h) > m.y - 10 && (player.y + player.h) < m.y + 18) {
         m.squish = 1; m.spent = 1.2;
-        startCloudRide(m.x, m.y);
+        player.vy = -TRAMPOLINE_BOUNCE;
+        player.onGround = false;
+        player.airJumps = 1;
+        player.cloudMusic = TRAMPOLINE_MUSIC;
+        game.shake = 10;
+        burst(m.x, m.y - 10, "#ffffff", 18, 260);
+        burst(m.x, m.y - 10, "#dff0ff", 12, 200);
+        S.boing();
+        MUSIC.setMode("cloud");
       }
       continue;
     }
@@ -2571,87 +2524,8 @@ function renderRainbow(t) {
   }
 }
 
-function renderCloud(t) {
-  const R = run.cloud, camX = run.camX;
-
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, "#bfe4ff"); g.addColorStop(0.55, "#e2f4ff"); g.addColorStop(1, "#fdfaff");
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-
-  ctx.fillStyle = "rgba(255,246,214,.7)";
-  ctx.beginPath(); ctx.arc(W - 120, 90, 44, 0, 7); ctx.fill();
-
-  for (let i = 0; i < 10; i++) {
-    const cx2 = mod(i * 260 - camX * 0.25, W + 420) - 210;
-    const cy2 = 60 + (i * 97) % 300;
-    ctx.globalAlpha = 0.85;
-    puff(cx2, cy2, 44 + (i % 3) * 12, "#ffffff");
-    ctx.globalAlpha = 0.28; puff(cx2 + 6, cy2 + 6, 44 + (i % 3) * 12, "#cfe8ff");
-    ctx.globalAlpha = 1;
-  }
-
-  ctx.save();
-  if (game.shake > 0.3) ctx.translate((Math.random() - 0.5) * game.shake, (Math.random() - 0.5) * game.shake);
-
-  drawParticles(camX);
-
-  for (const c of R.coins) {
-    if (c.got || c.x < camX - 40 || c.x > camX + W + 40) continue;
-    const x = c.x - camX, sw = Math.abs(Math.cos(t * 2.4 + c.x * 0.01));
-    ctx.save(); ctx.translate(x, c.y); ctx.scale(0.35 + sw * 0.65, 1);
-    ctx.fillStyle = "rgba(255,255,255,.5)";
-    ctx.beginPath(); ctx.arc(0, 0, 17, 0, 7); ctx.fill();
-    ctx.fillStyle = "#dff0ff"; ctx.beginPath(); ctx.arc(0, 0, 12, 0, 7); ctx.fill();
-    ctx.fillStyle = "#bfe0f5"; ctx.beginPath(); ctx.arc(0, 0, 9, 0, 7); ctx.fill();
-    ctx.fillStyle = "#7fb8dd"; ctx.font = "bold 12px ui-rounded,system-ui,sans-serif";
-    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("D", 0, 1);
-    ctx.restore();
-  }
-
-  const px = player.x - camX;
-  ctx.save();
-  ctx.translate(px, R.cy);
-  ctx.rotate(Math.max(-0.28, Math.min(0.28, R.vy / 1300)));
-  ctx.translate(-px, -R.cy);
-  const powerScale = player.power === "big" ? POWER_BIG_SCALE : 1;
-  drawDumplingHero(px, R.cy + 26, powerScale, t, Object.assign({
-    run: player.anim, air: 1, squash: 0, face: 1 },
-    { cape: player.power === "fly", flying: false }));
-  ctx.restore();
-
-  if (save.equipped) {
-    const def = byId(save.equipped);
-    if (def) drawSquishy(ctx, px - 50, R.cy + Math.sin(t * 3) * 7, 14, def, t);
-  }
-
-  ctx.font = "900 20px ui-rounded,system-ui,sans-serif";
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  for (const tx of world.texts) {
-    ctx.globalAlpha = Math.max(0, 1 - tx.life / tx.max);
-    ctx.lineWidth = 4; ctx.strokeStyle = "rgba(70,110,140,.5)";
-    ctx.strokeText(tx.txt, tx.x - camX, tx.y);
-    ctx.fillStyle = tx.color; ctx.fillText(tx.txt, tx.x - camX, tx.y);
-  }
-  ctx.globalAlpha = 1;
-  ctx.restore();
-
-  const frac = Math.max(0, 1 - R.t / CLOUD_TIME);
-  const bw = W * 0.42, bx = (W - bw) / 2, by = H - 34;
-  ctx.fillStyle = "rgba(140,190,220,.3)"; rr(bx, by, bw, 12, 6); ctx.fill();
-  ctx.fillStyle = "#bfe4ff"; rr(bx, by, Math.max(4, bw * frac), 12, 6); ctx.fill();
-  ctx.fillStyle = "rgba(60,90,110,.8)";
-  ctx.font = "900 14px ui-rounded,system-ui,sans-serif"; ctx.textAlign = "center";
-  ctx.fillText("☁ Cloud Drift  " + R.got + " coins", W/2, by - 13);
-
-  if (R.t < 0.4) {
-    ctx.fillStyle = "rgba(255,255,255," + (1 - R.t / 0.4).toFixed(3) + ")";
-    ctx.fillRect(0, 0, W, H);
-  }
-}
-
 function renderPlay(t) {
   if (run.rainbow) { renderRainbow(t); return; }
-  if (run.cloud) { renderCloud(t); return; }
   const camX = run.camX;
   ctx.save();
   if (game.shake > 0.3) ctx.translate((Math.random() - 0.5) * game.shake, (Math.random() - 0.5) * game.shake);
@@ -2937,6 +2811,26 @@ function showGameOver() {
   showMenu(menuGameOver());
 }
 
+function activateGodMode() {
+  audioOn();
+  save.eggTier = EGGS.length;
+  persist();
+  S.godMode();
+  game.shake = 14;
+  showMenu(`
+    <div style="background:radial-gradient(ellipse at 50% 30%,#3a1206,#1a0a06);
+      margin:0;padding:clamp(36px,8vmin,80px) clamp(14px,2.6vmin,28px);border-radius:16px">
+      <h1 style="background:linear-gradient(90deg,#ff4400,#ffae00,#ff4400);-webkit-background-clip:text;background-clip:text;color:transparent;
+        font-size:clamp(22px,5.6vmin,52px);text-shadow:0 0 30px rgba(255,80,0,.6);letter-spacing:.04em;margin:0">
+        GOD MODE ACTIVATED
+      </h1>
+      <p style="color:#ffb066;font-weight:800;margin:.8em 0 0;font-size:clamp(11px,2vmin,17px)">
+        idfka — every egg tier unlocked. Go hatch something horrifying and cute.
+      </p>
+    </div>`);
+  setTimeout(() => { if (game.state === "hub") goHub(); }, 1900);
+}
+
 function goHub() {
   game.state = "hub";
   MUSIC.setMode("hub");
@@ -3048,7 +2942,7 @@ function frame(now) {
 /* poke at the game from the browser console: __SE.save, __SE.player, etc. */
 window.__SE = { game, save, player, run, world, startRun, goHub, beginHatch, persist, MUSIC, SECTIONS,
                 rainbowY, startRainbow, endRainbow, buildChunk, resetWorld, grabStar, VERSION,
-                tileAtPx, isSolidPx, bumpBrick, cloudY, startCloudRide, endCloudRide, equippedPower,
+                tileAtPx, isSolidPx, bumpBrick, equippedPower,
                 SQUISHIES, EGGS, TEMPLATES, grant, input, reset(){ localStorage.removeItem(SAVE_KEY); location.reload(); } };
 
 /* first boot: the common egg from the spec, free, hatching on its own */

@@ -32,7 +32,7 @@ and on an iPad (on-screen buttons appear the moment you touch the screen).
 | Hold jump on the rainbow | fly up — let go to drop |
 | Stand on a slope | **slide** down it automatically, arms in the air —<br>hold the uphill direction instead if you want to climb |
 | Jump into a brick from below | crack it — 3 hits and it bursts |
-| Land on a trampoline | bounce into a calm cloud break |
+| Land on a trampoline | a huge bounce, up near the clouds |
 | ⭐ Star | invincible for 11 seconds |
 | P or Esc | pause |
 | M | mute |
@@ -128,14 +128,17 @@ of it.
 ## 🧸 The trampoline
 
 A cute bouncy trampoline sits on the ground here and there, springs and all.
-Land on it — actually land, falling onto it — and it flings you way up into a
-**calm cloud bonus round**, no glowing pickup needed, just a good jump.
+Land on it — actually land, falling onto it — and it gives you a **much bigger
+bounce** than a normal jump, up near the cloud layer in the background.
 
-The clouds are the carrot's gentler sibling: same shape (fly around, grab
-coins, land back on the course when it ends), but slower, drifts more, worth
-less per coin, and the music turns properly peaceful — soft, sparse, almost no
-drums. It's the chill option next to the rainbow's big flashy one. The squish
-wall waits for you here too.
+This is deliberately *not* a separate mode like the rainbow ride. There's no
+timer, no locked camera, no scripted coin field — you're still inside the
+ordinary run the whole time, just launched a long way up by gravity, same as
+any other jump. The music dips into a short, peaceful phrase while you're
+airborne from the bounce and hands back to normal the moment you land (or
+after a couple of seconds, whichever comes first). Land wherever the arc
+happens to put you and keep running. The squish wall doesn't pause for this —
+you're never out of the run.
 
 ## The music
 
@@ -195,7 +198,9 @@ of course: **12 rows of exactly 16 characters**.
     they stop feeling special.
  >  ramp climbing to the right     <  ramp dropping to the right
  T  trampoline -- a physical object on the ground. Landing on it (falling
-    onto it, not just walking past) launches the calm cloud bonus round.
+    onto it, not just walking past) launches a huge bounce -- not a mode
+    switch, just a much bigger version of a normal jump. `TRAMPOLINE_BOUNCE`
+    at the top of the file sets how high.
     Ramps are 45 degrees and one tile each, so a hill is a diagonal staircase
     of them. Every ramp needs a solid tile directly underneath it, or the
     dumpling falls straight through. `STEP_UP` is how tall a lip the dumpling
@@ -251,8 +256,28 @@ Three rules so the course stays possible:
 
 Hatching stays cheap (25 🪙) so the early loop feels good fast. Egg upgrades
 get steep near the top on purpose — the jump from Legendary to the final
-**Mythic Egg** costs 4200, because Mythic squishies (and their superpowers)
-are meant to be a real chase, not a given.
+**Mythic Egg** costs 5460, because Mythic squishies (and their superpowers)
+are meant to be a real chase, not a given. (Egg upgrade costs are +30% on
+Annie's request — was 100/300/750/1700/4200, now 130/390/975/2210/5460.)
+
+### Every course piece can come out mirrored
+
+Each hand-built 16×12 piece can get stamped flipped left-right, at random,
+each time it's used — ramps run the other way, patrols walk the other way,
+coin arcs curve the other way. It's the same 36 pieces underneath, but it
+roughly doubles how varied the course feels without hand-drawing a single new
+one. Every piece was checked in both orientations before this shipped —
+mirroring a ramp swaps its direction, everything else just needs its column
+reversed.
+
+### idfka
+
+Type **IDFKA** while on the main menu and it unlocks every egg tier straight
+to Mythic, with a "GOD MODE ACTIVATED" splash and a little synthesized power-up
+sting — an original jingle in the spirit of the classic FPS cheat this is
+named after, not a sample of it. Purely a fun Easter egg for testing or
+showing off the top-tier squishies; it doesn't touch your Dumpleningness or
+your collection.
 
 ### Poking at it while it runs
 
@@ -272,6 +297,12 @@ collection.
 
 The version is shown on the main menu, under the title.
 
+- **v1.7.0** — the trampoline no longer switches into a separate cloud mode;
+  it's just a much bigger jump now, with a short peaceful music dip while
+  you're airborne from it. Trampolines are half as common. Every course piece
+  can now come out mirrored for more variety. An `IDFKA` cheat code on the
+  main menu unlocks every egg tier. Egg upgrade costs are up 30% on Annie's
+  request.
 - **v1.6.0** — a fifth rarity (Mythic) with four equippable superpowers
   (speed, higher jump, bigger size, cape flight); nine new squishies; a
   trampoline that bounces you into a calm cloud bonus round with its own
