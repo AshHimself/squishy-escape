@@ -3219,9 +3219,19 @@ async function mpEnterRoom(action) {
     mp.sessionId = room.sessionId; mp.code = room.code;
     mp.roster = await MP.fetchRoster(mp.sessionId);
     mp.unwatchRoom = MP.watchRoom(mp.sessionId, { playerId: mp.playerId, nickname: mp.nickname }, {
-      onPresence: players => { mp.roster = players; if (!mp.trade) showMenu(menuLobby()); },
+      onPresence: players => {
+        mp.roster = players;
+        // don't yank the screen back to the lobby while a shared run is
+        // actively playing -- presence resyncs constantly on mobile (any
+        // network blip or app-switch triggers one), and this was covering
+        // the whole canvas with the lobby menu mid-game, which looked like
+        // "I can't see the other player" when it was really "I can't see
+        // anything, the lobby is on top of it"
+        if (!mp.trade && game.state !== "coop") showMenu(menuLobby());
+      },
       onBroadcast: payload => {
         if (payload.type === "coop_start" && !coop.active) { mpStartCoopGuest(); return; }
+        if (game.state === "coop") return;  // same reasoning as onPresence above
         if (payload.type === "trade_started" && payload.toPlayerId === mp.playerId && !mp.trade) {
           // someone proposed a trade with *us* -- open the trade sheet as the recipient
           mp.trade = { id: payload.tradeId, otherPlayerId: payload.fromPlayerId, otherNickname: payload.fromNickname,
@@ -3271,8 +3281,12 @@ function buildChunkAndBroadcast(index) {
   MP.broadcastCoopChunk(mp.sessionId, coopChunkPayload(index));
 }
 
-function mpStartCoopHost() {
+async function mpStartCoopHost() {
   mp.isCoopHost = true;
+  // re-fetch right before building player entities -- mp.roster is only as
+  // fresh as the last presence sync, and a friend who joined moments ago
+  // could otherwise be silently left out of the game entirely
+  mp.roster = await MP.fetchRoster(mp.sessionId);
   resetWorld();
   coop.players.clear();
   for (const r of mp.roster) coop.players.set(r.playerId, makePlayerEntity(r.playerId, r.nickname, {}));
