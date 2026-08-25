@@ -3275,6 +3275,7 @@ function mpStartCoopHost() {
   for (const r of mp.roster) coop.players.set(r.playerId, makePlayerEntity(r.playerId, r.nickname, {}));
   coop.tick = 0; coop.lastSnapshotT = 0; coop.camX = 0; coop.active = true;
   coop.gotCoins = []; coop.gotPickups = [];
+  coop.wall = { x: -420, dist: 0, maxX: 100 };
   game.state = "coop";
   setPlayUI(true);
   showMenu(null);
@@ -3294,6 +3295,7 @@ function mpStartCoopGuest() {
   mp.isCoopHost = false;
   coop.players.clear();
   coop.lastSnapshot = null; coop.camX = 0; coop.active = true;
+  coop.wall = { x: -420, dist: 0, maxX: 100 };
   clearWorldForCoopGuest();  // clears any stale local world; chunks arrive for real via onChunk below
   game.state = "coop";
   setPlayUI(true);
@@ -3324,6 +3326,7 @@ function applyCoopSnapshotToWorld(snap) {
     const e = world.enemies.find(x => x._id === es.id);
     if (e) { e.x = es.x; e.y = es.y; e.dead = es.dead; }
   }
+  if (snap.wall) { coop.wall.x = snap.wall.x; coop.wall.dist = snap.wall.dist; }
 }
 
 function leaveCoop() {
@@ -3345,9 +3348,26 @@ function updateCoopHost(dt) {
   for (const p of coop.players.values()) if (p.alive) stepPlayerEntity(p, dt);
   updateCoopWorld(dt);
 
-  let maxX = 100;
-  for (const p of coop.players.values()) if (p.x > maxX) maxX = p.x;
+  let maxX = 100, maxAliveX = 100, anyAlive = false;
+  for (const p of coop.players.values()) {
+    if (p.x > maxX) maxX = p.x;
+    if (p.alive) { anyAlive = true; if (p.x > maxAliveX) maxAliveX = p.x; }
+  }
   while ((maxX + 3 * CHUNK_W) > (world.built + 1) * CHUNK_W) buildChunkAndBroadcast(world.built + 1);
+
+  /* ---- the squish wall: one shared entity, same solo curve, paced by
+     whoever's furthest ahead and still alive ---- */
+  if (anyAlive) {
+    coop.wall.maxX = Math.max(coop.wall.maxX, maxAliveX);
+    coop.wall.dist = Math.max(0, Math.floor((coop.wall.maxX - 100) / TILE));
+    const ws = Math.min(WALL_MAX, WALL_BASE + coop.wall.dist * WALL_GAIN);
+    coop.wall.x += ws * dt;
+    const lead = maxAliveX - coop.wall.x;
+    if (lead > WALL_LEASH) coop.wall.x += (lead - WALL_LEASH) * 1.7 * dt;
+    for (const p of coop.players.values()) {
+      if (p.alive && coop.wall.x + 30 > p.x + 8) eliminatePlayerCoop(p, "wall");
+    }
+  }
 
   coop.tick++;
   const now = performance.now();
@@ -3355,10 +3375,11 @@ function updateCoopHost(dt) {
     coop.lastSnapshotT = now;
     MP.broadcastCoopSnapshot(mp.sessionId, {
       tick: coop.tick,
+      wall: { x: coop.wall.x, dist: coop.wall.dist },
       players: Array.from(coop.players.values()).map(p => ({
         id: p.id, x: p.x, y: p.y, vx: p.vx, vy: p.vy, face: p.face,
         onGround: p.onGround, slide: p.slide, squash: p.squash,
-        star: p.star > 0, hearts: p.hearts, alive: p.alive,
+        star: p.star > 0, hearts: p.hearts, alive: p.alive, eliminated: p.eliminated,
       })),
       coinsGot: coop.gotCoins, pickupsGot: coop.gotPickups,
       enemies: world.enemies.map(e => ({ id: e._id, x: e.x, y: e.y, dead: e.dead })),
@@ -3570,7 +3591,40 @@ function renderCoop(t, dt) {
     ctx.fillStyle = tx.color; ctx.fillText(tx.txt, tx.x - camX, tx.y);
   }
   ctx.globalAlpha = 1;
+  drawWallCoop(camX, t);
+  if (me.alive !== false) drawWallWarningCoop(camX, t, me.x);
   ctx.restore();
+}
+
+/* wall drawing, parameterized off coop.wall.x instead of the solo run.wallX
+   global -- otherwise identical to drawWall/drawWallWarning */
+function drawWallCoop(camX, t) {
+  const edge = coop.wall.x - camX;
+  if (edge < -60) return;
+  const g = ctx.createLinearGradient(-40, 0, edge, 0);
+  g.addColorStop(0, "#c2508f"); g.addColorStop(0.6, "#ef82b6"); g.addColorStop(1, "#ffb3d4");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.moveTo(-60, -20); ctx.lineTo(-60, H + 20);
+  for (let y = H + 20; y >= -20; y -= 14) {
+    ctx.lineTo(edge + Math.sin(y * 0.035 + t * 3.4) * 9 + Math.sin(y * 0.09 - t * 2) * 4, y);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,.35)";
+  for (let i = 0; i < 12; i++) {
+    const yy = mod(i * 61 - t * 46, H + 60) - 30;
+    const xx = edge - 26 - Math.sin(yy * 0.05 + t) * 16;
+    ctx.beginPath(); ctx.arc(xx, yy, 3 + (i % 3), 0, 7); ctx.fill();
+  }
+}
+
+function drawWallWarningCoop(camX, t, myX) {
+  const gap = myX - coop.wall.x;
+  if (gap > 300) return;
+  const heat = Math.min(1, (300 - gap) / 260) * (0.55 + 0.45 * Math.sin(t * 11));
+  const g = ctx.createLinearGradient(0, 0, W * 0.55, 0);
+  g.addColorStop(0, "rgba(255,80,150," + (0.5 * heat).toFixed(3) + ")");
+  g.addColorStop(1, "rgba(255,80,150,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W * 0.55, H);
 }
 
 function mpOnTradeRow(row) {
