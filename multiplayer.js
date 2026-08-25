@@ -186,6 +186,50 @@
     ch.send({ type: "broadcast", event: "trade", payload: { type, ...payload } });
   }
 
+  // --------------------------- shared arena (coop) ---------------------------
+  // Deliberately a separate channel from the room/trade one above -- keeps
+  // the ~15Hz input/snapshot traffic isolated from the already-shipped
+  // trading feature, and avoids registering new .on() handlers on a channel
+  // that's already subscribed (supabase-js wants handlers wired up first).
+
+  const coopChannels = new Map(); // sessionId -> realtime channel
+
+  function watchCoop(sessionId, { onInput, onSnapshot, onChunk, onTile } = {}) {
+    const ch = sb.channel(`coop:${sessionId}`);
+    coopChannels.set(sessionId, ch);
+    if (onInput) ch.on("broadcast", { event: "input" }, ({ payload }) => onInput(payload));
+    if (onSnapshot) ch.on("broadcast", { event: "snapshot" }, ({ payload }) => onSnapshot(payload));
+    if (onChunk) ch.on("broadcast", { event: "chunk" }, ({ payload }) => onChunk(payload));
+    if (onTile) ch.on("broadcast", { event: "tile" }, ({ payload }) => onTile(payload));
+    ch.subscribe();
+    return () => {
+      sb.removeChannel(ch);
+      coopChannels.delete(sessionId);
+    };
+  }
+
+  function broadcastCoopInput(sessionId, input) {
+    const ch = coopChannels.get(sessionId);
+    if (ch) ch.send({ type: "broadcast", event: "input", payload: input });
+  }
+
+  function broadcastCoopSnapshot(sessionId, snapshot) {
+    const ch = coopChannels.get(sessionId);
+    if (ch) ch.send({ type: "broadcast", event: "snapshot", payload: snapshot });
+  }
+
+  function broadcastCoopChunk(sessionId, chunk) {
+    const ch = coopChannels.get(sessionId);
+    if (ch) ch.send({ type: "broadcast", event: "chunk", payload: chunk });
+  }
+
+  // A single tile character changed (a brick broke, a plank fell/reformed) --
+  // far cheaper than re-sending the whole chunk's tile string.
+  function broadcastCoopTile(sessionId, tile) {
+    const ch = coopChannels.get(sessionId);
+    if (ch) ch.send({ type: "broadcast", event: "tile", payload: tile });
+  }
+
   // -------------------------------- trades ----------------------------------
 
   async function proposeTrade(sessionId, otherPlayerId, offerItems) {
@@ -304,6 +348,11 @@
     pullInventory,
     updateSave,
     getLeaderboard,
+    watchCoop,
+    broadcastCoopInput,
+    broadcastCoopSnapshot,
+    broadcastCoopChunk,
+    broadcastCoopTile,
     MPError,
   };
 })();

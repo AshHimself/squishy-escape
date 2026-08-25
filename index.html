@@ -793,14 +793,30 @@ const world = {
   built: -1,          // highest chunk index generated so far
   coins: [], hazards: [], enemies: [], rings: [], parts: [], texts: [], pickups: [], movers: [], lastPickup: -99, lastCarrot: -99
 };
+// stable per-entity ids, assigned at creation -- inert for solo play, used by
+// the shared arena to address coins/enemies/etc across the network
+let nextEntityId = 1;
+const newEntityId = () => nextEntityId++;
 
-function resetWorld() {
+// shared by resetWorld() and the coop guest's clear-without-generating below
+function clearWorld() {
   world.tiles.clear(); world.built = -1;
   world.coins.length = world.hazards.length = 0;
   world.enemies.length = world.rings.length = world.parts.length = world.texts.length = 0;
   world.pickups.length = 0; world.movers.length = 0;
   world.lastPickup = -99; world.lastCarrot = -99;
+}
+
+function resetWorld() {
+  clearWorld();
   for (let i = 0; i <= 3; i++) buildChunk(i);
+}
+
+// A coop guest must NEVER call buildChunk() itself (that would generate its
+// own random layout instead of the host's) -- clear local state and wait
+// for the host's chunk broadcasts to populate it.
+function clearWorldForCoopGuest() {
+  clearWorld();
 }
 
 function pickTemplate(index) {
@@ -831,31 +847,31 @@ function buildChunk(index) {
       const ch = mirror ? mirrorChar(tpl.rows[r][COLS - 1 - c]) : tpl.rows[r][c];
       const wx = index * CHUNK_W + c * TILE, wy = r * TILE;
       switch (ch) {
-        case "o": world.coins.push({ x:wx + TILE/2, y:wy + TILE/2, got:false, t:Math.random()*6 }); break;
+        case "o": world.coins.push({ _id:newEntityId(), x:wx + TILE/2, y:wy + TILE/2, got:false, t:Math.random()*6 }); break;
         case "D": case "S": case "P": case "N": case "B":
-          world.hazards.push({ x:wx + TILE/2, y:wy + TILE - 17, kind:ch, t:Math.random()*6 }); break;
-        case "X": world.movers.push({ kind:"X", ci:index, row:r, col:c,
+          world.hazards.push({ _id:newEntityId(), x:wx + TILE/2, y:wy + TILE - 17, kind:ch, t:Math.random()*6 }); break;
+        case "X": world.movers.push({ _id:newEntityId(), kind:"X", ci:index, row:r, col:c,
                     x:wx + TILE/2, y:wy + TILE/2, hits:0, shake:0 }); break;
-        case "T": world.movers.push({ kind:"T", x:wx + TILE/2, y:wy + TILE - 15,
+        case "T": world.movers.push({ _id:newEntityId(), kind:"T", x:wx + TILE/2, y:wy + TILE - 15,
                     squish:0, spent:0, t:Math.random()*6 }); break;
-        case "=": world.movers.push({ kind:"P", ci:index, row:r, col:c,
+        case "=": world.movers.push({ _id:newEntityId(), kind:"P", ci:index, row:r, col:c,
                     x:wx + TILE/2, y:wy + TILE/2, state:"solid", timer:0, fy:0, vy:0 }); break;
-        case "?": world.hazards.push({ x:wx + TILE/2, y:wy + TILE - 17,
+        case "?": world.hazards.push({ _id:newEntityId(), x:wx + TILE/2, y:wy + TILE - 17,
                     kind:"DSPNB"[(Math.random()*5)|0], t:Math.random()*6 }); break;
-        case "F": world.movers.push({ kind:"F", x:wx + TILE/2, y0:wy + TILE/2, y:wy + TILE/2,
+        case "F": world.movers.push({ _id:newEntityId(), kind:"F", x:wx + TILE/2, y0:wy + TILE/2, y:wy + TILE/2,
                     vy:0, state:"hang", timer:0, t:Math.random()*6 }); break;
-        case "W": world.movers.push({ kind:"W", x0:wx + TILE/2, x:wx + TILE/2, y:wy + TILE - 19,
+        case "W": world.movers.push({ _id:newEntityId(), kind:"W", x0:wx + TILE/2, x:wx + TILE/2, y:wy + TILE - 19,
                     vx:-118, rot:0, state:"roll", timer:0, t:0 }); break;
-        case "Z": world.movers.push({ kind:"Z", x:wx + TILE/2, y0:wy + TILE - 17, y:wy + TILE - 17,
+        case "Z": world.movers.push({ _id:newEntityId(), kind:"Z", x:wx + TILE/2, y0:wy + TILE - 17, y:wy + TILE - 17,
                     phase:Math.random()*3, t:0 }); break;
         case "!":
           // a carrot, but only if we haven't handed one out recently
           if (index - world.lastCarrot >= 6) {
-            world.pickups.push({ x:wx + TILE/2, y:wy + TILE/2, kind:"carrot", got:false, t:Math.random()*6 });
+            world.pickups.push({ _id:newEntityId(), x:wx + TILE/2, y:wy + TILE/2, kind:"carrot", got:false, t:Math.random()*6 });
             world.lastCarrot = index;
           }
           break;
-        case "R": world.rings.push({ x:wx + TILE/2, y:wy + TILE/2, base:wy + TILE/2, a:Math.random()*6.28 }); break;
+        case "R": world.rings.push({ _id:newEntityId(), x:wx + TILE/2, y:wy + TILE/2, base:wy + TILE/2, a:Math.random()*6.28 }); break;
         case "6": world.enemies.push(makeEnemy(wx + TILE/2, wy + TILE, "6")); break;
         case "7": world.enemies.push(makeEnemy(wx + TILE/2, wy + TILE, "7")); break;
       }
@@ -874,7 +890,7 @@ function buildChunk(index) {
     }
     if (spots.length) {
       const c = spots[(Math.random() * spots.length) | 0];
-      world.pickups.push({ x: index * CHUNK_W + c * TILE + TILE/2, y: 8 * TILE + TILE/2,
+      world.pickups.push({ _id: newEntityId(), x: index * CHUNK_W + c * TILE + TILE/2, y: 8 * TILE + TILE/2,
                            kind: "star", got: false, t: Math.random() * 6 });
       world.lastPickup = index;
     }
@@ -886,6 +902,7 @@ function buildChunk(index) {
 
 function makeEnemy(cx, footY, kind) {
   return {
+    _id: newEntityId(),
     x: cx - 17, y: footY - 36, w: 34, h: 36,
     vx: (Math.random() < 0.5 ? -1 : 1) * (kind === "6" ? 62 : 40), vy: 0,
     kind, onGround: false, hopT: 0.4 + Math.random(), dead: 0, t: Math.random() * 6
@@ -1020,6 +1037,43 @@ const player = { x:100, y:455, w:30, h:40, vx:0, vy:0, prevY:455, onGround:false
                  power:null, flyFuel:FLY_TIME, flying:false, cloudMusic:0 };
 const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, camY:0, over:false, endT:0, rainbow:null };
 const trail  = [];   // breadcrumb positions so the companion squishy can follow
+
+/* ==========================================================================
+   SHARED ARENA (host-authoritative co-op) -- entirely additive alongside the
+   singular `player`/`run` above, which stay untouched for solo play. The
+   room host simulates every PlayerEntity + the shared `world`; other clients
+   just forward input and render whatever the host broadcasts. See the plan
+   for the full design; this is Stage 1 -- movement/collision only, no
+   coins/bricks/wall/enemies/hearts yet.
+   ========================================================================== */
+const coop = {
+  active: false,
+  players: new Map(),     // playerId -> PlayerEntity, host-authoritative
+  tick: 0,
+  lastSnapshotT: 0,
+  lastSnapshot: null,     // guest-side: most recent host snapshot
+  camX: 0,                // per-client camera, independent of the host's
+  lastSentInput: null,
+  lastInputSentT: 0,
+  myJumpSeq: 0,
+  remoteAnim: new Map(),  // guest-side only: locally-accumulated run-cycle phase per remote player id
+  gotCoins: [], gotPickups: [],  // host-only: newly-collected ids since the last snapshot
+};
+
+function makePlayerEntity(playerId, nickname, cosmetics) {
+  cosmetics = cosmetics || {};
+  return {
+    id: playerId, nickname,
+    x:100, y:455, w:30, h:40, vx:0, vy:0, prevY:455, onGround:false,
+    face:1, coyote:0, buffer:0, iframes:0, hearts:3, anim:0, squash:0, combo:0, airJumps:1, star:0,
+    slide:false, slopeDir:0, lastSlope:0, slopeGrace:0, runT:0, runDir:0,
+    power: cosmetics.power || null, flyFuel: FLY_TIME, flying:false,
+    alive:true, eliminated:null,
+    money:0, coins:0, stomps:0,
+    input: { left:false, right:false, jumpHeld:false },
+    jumpSeq:0, lastJumpSeqSeen:0,
+  };
+}
 
 function startRun() {
   audioOn();
@@ -1164,6 +1218,134 @@ function respawnFromPit() {
     }
   }
   player.x += TILE * 3; player.y = 200; player.vx = player.vy = 0; hurt();
+}
+
+/* ---- Shared-arena Stage 1: movement/collision only, for one PlayerEntity.
+   Deliberately duplicated from the solo movement block above rather than
+   shared, so the working solo path can never regress from this. No hearts,
+   coins, hazards, bricks, or wall yet -- those come in later stages. ---- */
+function respawnPlayerEntityFromPit(p) {
+  let col = Math.floor(p.x / TILE);
+  for (let i = 0; i < 200; i++) {
+    const px = (col + i) * TILE + TILE/2;
+    if (isSolidPx(px, (ROWS - 1) * TILE + 4)) {
+      p.x = px - p.w/2; p.y = (ROWS - 1) * TILE - p.h - 90; p.vx = 0; p.vy = 0;
+      hurtP(p);
+      return;
+    }
+  }
+  p.x += TILE * 3; p.y = 200; p.vx = p.vy = 0; hurtP(p);
+}
+
+function stepPlayerEntity(p, dt) {
+  let dir = (p.input.right ? 1 : 0) - (p.input.left ? 1 : 0);
+
+  if (dir !== 0 && dir === p.runDir) p.runT += dt;
+  else { p.runT = 0; p.runDir = dir; }
+  const wind = Math.max(0, Math.min(1, (p.runT - SPRINT_AFTER) / SPRINT_RAMP));
+  const speedMult = p.power === "speed" ? POWER_SPEED_MULT : 1;
+  const topSpeed = (MAX_RUN + (SPRINT_RUN - MAX_RUN) * wind) * speedMult;
+
+  if (p.slopeDir !== 0) { p.lastSlope = p.slopeDir; p.slopeGrace = 0.28; }
+  else p.slopeGrace = Math.max(0, p.slopeGrace - dt);
+  const onSlope = p.slopeDir !== 0 || p.slopeGrace > 0;
+  const downhill = p.slopeDir !== 0 ? p.slopeDir : p.lastSlope;
+  const fightingIt = dir !== 0 && downhill !== 0 && dir === -downhill;
+  p.slide = p.onGround && onSlope && !fightingIt && downhill !== 0;
+  if (p.slide) {
+    p.vx += downhill * SLIDE_ACCEL * dt;
+    p.vx = Math.max(-SLIDE_MAX, Math.min(SLIDE_MAX, p.vx));
+    if (downhill !== 0) p.face = downhill;
+  } else {
+    const accel = p.onGround ? RUN_ACCEL : AIR_ACCEL;
+    if (dir !== 0) {
+      p.vx += dir * accel * dt;
+      p.vx = Math.max(-topSpeed, Math.min(topSpeed, p.vx));
+      p.face = dir;
+    } else if (p.onGround) {
+      const f = FRICTION * dt;
+      p.vx = Math.abs(p.vx) <= f ? 0 : p.vx - Math.sign(p.vx) * f;
+    }
+  }
+
+  /* jump: edge-triggered off jumpSeq (a counter, not a boolean) so a press
+     can never be lost between two ~15Hz network input messages */
+  if (p.jumpSeq !== p.lastJumpSeqSeen) { p.lastJumpSeqSeen = p.jumpSeq; p.buffer = JUMP_BUFFER; }
+  p.buffer -= dt; p.coyote -= dt;
+  const jumpMult = p.power === "jump" ? POWER_JUMP_MULT : 1;
+  if (p.buffer > 0 && p.coyote > 0) {
+    p.vy = -JUMP_V * jumpMult; p.buffer = 0; p.coyote = 0;
+    p.onGround = false; p.squash = -0.35;
+  } else if (p.buffer > 0 && p.airJumps > 0 && !p.onGround) {
+    p.airJumps--; p.buffer = 0;
+    p.vy = -JUMP_V * DOUBLE_V * jumpMult; p.squash = -0.45;
+  }
+  if (p.vy < 0 && !p.input.jumpHeld) p.vy *= Math.pow(JUMP_CUT, dt * 60 / 8);
+
+  p.prevY = p.y;
+  const hit = moveBody(p, dt, p.power === "big" ? STEP_UP * POWER_BIG_STEP : STEP_UP);
+  p.slopeDir = hit.slope || 0;
+  if (hit.ceil) {
+    const hy = p.y - 5;
+    bumpBrickFor(p, p.x + 5, hy) || bumpBrickFor(p, p.x + p.w/2, hy) || bumpBrickFor(p, p.x + p.w - 5, hy);
+  }
+  if (hit.ground) {
+    if (!p.onGround) p.squash = 0.45;
+    p.onGround = true; p.coyote = COYOTE; p.combo = 0; p.airJumps = 1;
+  } else {
+    if (p.onGround) p.coyote = COYOTE;
+    p.onGround = false;
+  }
+  if (p.y > H + 120) respawnPlayerEntityFromPit(p);
+  p.iframes = Math.max(0, p.iframes - dt);
+  if (p.star > 0) { p.star -= dt; if (p.star <= 0) p.star = 0; }
+
+  p.anim += dt * (p.onGround ? Math.abs(p.vx) / 42 : 4);
+  p.squash += (0 - p.squash) * Math.min(1, dt * 12);
+}
+
+/* ---- Stage 2: per-player damage/scoring actions, credited individually ---- */
+function eliminatePlayerCoop(p, cause) {
+  if (p.eliminated) return;   // idempotency guard, same reasoning as endRun's `if (run.over) return`
+  p.eliminated = cause; p.alive = false;
+}
+
+function hurtP(p) {
+  if (!p.alive || p.iframes > 0 || p.star > 0) return;
+  p.hearts--; p.iframes = IFRAMES; p.combo = 0;
+  p.vy = -320; p.vx = -220 * p.face;
+  game.shake = 11; S.hurt();
+  burst(p.x + p.w/2, p.y + p.h/2, "#ff9fc4", 14);
+  if (p.hearts <= 0) eliminatePlayerCoop(p, "hearts");
+}
+
+function grabStarFor(p, cx, cy) {
+  p.star = STAR_TIME;
+  game.shake = 10; S.star();
+  floatText(cx, cy - 20, "INVINCIBLE!", "#ffe97a");
+  for (let i = 0; i < 5; i++) burst(cx, cy, ["#ffe97a","#fff6c2","#ffd36b","#ffffff","#ffb3d4"][i], 8, 300);
+}
+
+function bumpBrickFor(p, px, py) {
+  if (tileAtPx(px, py) !== "X") return false;
+  const col = Math.floor(px / TILE), row = Math.floor(py / TILE);
+  const ci = Math.floor(col / COLS), lc = col - ci * COLS;
+  const m = world.movers.find(v => v.kind === "X" && v.ci === ci && v.row === row && v.col === lc);
+  if (!m || m.hits >= BRICK_HITS) return false;
+  m.hits++; m.shake = 0.2;
+  game.shake = Math.max(game.shake, 3);
+  if (m.hits >= BRICK_HITS) {
+    setTile(ci, row, lc, ".");
+    if (mp.isCoopHost) MP.broadcastCoopTile(mp.sessionId, { index: ci, row, col: lc, ch: "." });
+    burst(m.x, m.y, "#c9925a", 22, 280); burst(m.x, m.y, "#e8bd86", 12, 200);
+    S.brickBreak(); game.shake = 7;
+    p.money += 2;
+    floatText(m.x, m.y - 14, "+2", "#e8bd86");
+  } else {
+    burst(m.x, m.y - 12, "#d8a56a", 7, 150);
+    S.brickHit();
+  }
+  return true;
 }
 
 /* the shape of the rainbow in world space -- the road and the coins on it both
@@ -2860,6 +3042,7 @@ let mp = {
   busy: false, error: null,
   leaderboard: null,   // cached rows from the last load, or null before first load
   syncNotice: null,    // set when a post-run score push fails, shown once on the hub
+  isCoopHost: false, unwatchCoop: null,   // shared-arena state
 };
 
 function menuMPLoading(msg) {
@@ -2940,7 +3123,10 @@ function menuLobby() {
     <div class="grid">${rosterHtml}</div>
     ${mp.notice ? `<p class="sub">${escapeHtml(mp.notice)}</p>` : ""}
     ${mp.error ? `<p class="sub" style="color:#c0392b;font-weight:800">${escapeHtml(mp.error)}</p>` : ""}
-    <div class="btns"><button data-act="mpLeaveRoom">🚪 Leave Room</button><button data-act="hub">Back</button></div>`;
+    <div class="btns">
+      ${mp.roster.length >= 2 ? `<button class="primary" data-act="mpStartCoop">▶ Play Together</button>` : ""}
+      <button data-act="mpLeaveRoom">🚪 Leave Room</button><button data-act="hub">Back</button>
+    </div>`;
 }
 
 function menuTradeSession() {
@@ -3032,6 +3218,7 @@ async function mpEnterRoom(action) {
     mp.unwatchRoom = MP.watchRoom(mp.sessionId, { playerId: mp.playerId, nickname: mp.nickname }, {
       onPresence: players => { mp.roster = players; if (!mp.trade) showMenu(menuLobby()); },
       onBroadcast: payload => {
+        if (payload.type === "coop_start" && !coop.active) { mpStartCoopGuest(); return; }
         if (payload.type === "trade_started" && payload.toPlayerId === mp.playerId && !mp.trade) {
           // someone proposed a trade with *us* -- open the trade sheet as the recipient
           mp.trade = { id: payload.tradeId, otherPlayerId: payload.fromPlayerId, otherNickname: payload.fromNickname,
@@ -3052,6 +3239,338 @@ async function mpEnterRoom(action) {
     mp.busy = false; mp.error = err.message || "Something went wrong.";
     showMenu(menuLobby());
   }
+}
+
+/* ------------------------- shared arena (coop), Stage 1 ------------------------- */
+
+/* Packages one chunk's terrain + the coins/hazards/enemies/pickups/rings
+   that fall within it (by world-x range, not creation order -- robust
+   regardless of how/when buildChunk was called). Bricks/planks/droppers/
+   rolling cheese/bouncing berries/trampolines (world.movers) are NOT
+   included yet -- their solid state IS captured via the tile string itself
+   (bricks/planks are `#C=><X` characters), so they render correctly as
+   terrain on a guest, they just aren't independently interactive there yet. */
+function coopChunkPayload(index) {
+  const x0 = index * CHUNK_W, x1 = x0 + CHUNK_W;
+  const inRange = e => e.x >= x0 && e.x < x1;
+  return {
+    index, tiles: world.tiles.get(index),
+    coins: world.coins.filter(inRange).map(c => ({ _id: c._id, x: c.x, y: c.y })),
+    hazards: world.hazards.filter(inRange).map(h => ({ _id: h._id, x: h.x, y: h.y, kind: h.kind })),
+    enemies: world.enemies.filter(inRange).map(e => ({ _id: e._id, x: e.x, y: e.y, kind: e.kind })),
+    pickups: world.pickups.filter(inRange).map(pk => ({ _id: pk._id, x: pk.x, y: pk.y, kind: pk.kind })),
+    rings: world.rings.filter(inRange).map(rg => ({ _id: rg._id, x: rg.x, y: rg.y, base: rg.base })),
+  };
+}
+
+function buildChunkAndBroadcast(index) {
+  buildChunk(index);
+  MP.broadcastCoopChunk(mp.sessionId, coopChunkPayload(index));
+}
+
+function mpStartCoopHost() {
+  mp.isCoopHost = true;
+  resetWorld();
+  coop.players.clear();
+  for (const r of mp.roster) coop.players.set(r.playerId, makePlayerEntity(r.playerId, r.nickname, {}));
+  coop.tick = 0; coop.lastSnapshotT = 0; coop.camX = 0; coop.active = true;
+  coop.gotCoins = []; coop.gotPickups = [];
+  game.state = "coop";
+  setPlayUI(true);
+  showMenu(null);
+  mp.unwatchCoop = MP.watchCoop(mp.sessionId, {
+    onInput: msg => {
+      const p = coop.players.get(msg.playerId);
+      if (p) { p.input.left = msg.left; p.input.right = msg.right; p.input.jumpHeld = msg.jumpHeld; p.jumpSeq = msg.jumpSeq; }
+    },
+  });
+  MP.broadcastTradeEvent(mp.sessionId, "coop_start", {});
+  // the initial chunks (0-3) were built by resetWorld() before the coop
+  // channel existed -- send them now that guests can receive them
+  for (let i = 0; i <= world.built; i++) MP.broadcastCoopChunk(mp.sessionId, coopChunkPayload(i));
+}
+
+function mpStartCoopGuest() {
+  mp.isCoopHost = false;
+  coop.players.clear();
+  coop.lastSnapshot = null; coop.camX = 0; coop.active = true;
+  clearWorldForCoopGuest();  // clears any stale local world; chunks arrive for real via onChunk below
+  game.state = "coop";
+  setPlayUI(true);
+  showMenu(null);
+  mp.unwatchCoop = MP.watchCoop(mp.sessionId, {
+    onSnapshot: snap => { applyCoopSnapshotToWorld(snap); coop.lastSnapshot = snap; },
+    onChunk: chunk => {
+      world.tiles.set(chunk.index, chunk.tiles);
+      world.built = Math.max(world.built, chunk.index);
+      const addIfNew = (arr, list, extra) => {
+        for (const e of list) if (!arr.some(x => x._id === e._id)) arr.push(Object.assign({}, e, extra(e)));
+      };
+      addIfNew(world.coins, chunk.coins, () => ({ got: false, t: Math.random() * 6 }));
+      addIfNew(world.hazards, chunk.hazards, () => ({ t: Math.random() * 6 }));
+      addIfNew(world.enemies, chunk.enemies, () => ({ w: 34, h: 40, vx: 0, vy: 0, onGround: false, hopT: 1, dead: 0, t: 0 }));
+      addIfNew(world.pickups, chunk.pickups, () => ({ got: false, t: Math.random() * 6 }));
+      addIfNew(world.rings, chunk.rings, () => ({ a: Math.random() * 6.28 }));
+    },
+    onTile: t => setTile(t.index, t.row, t.col, t.ch),
+  });
+}
+
+// guest-side: apply the host's per-tick deltas onto the locally-mirrored world
+function applyCoopSnapshotToWorld(snap) {
+  for (const id of snap.coinsGot || []) { const c = world.coins.find(x => x._id === id); if (c) c.got = true; }
+  for (const id of snap.pickupsGot || []) { const pk = world.pickups.find(x => x._id === id); if (pk) pk.got = true; }
+  for (const es of snap.enemies || []) {
+    const e = world.enemies.find(x => x._id === es.id);
+    if (e) { e.x = es.x; e.y = es.y; e.dead = es.dead; }
+  }
+}
+
+function leaveCoop() {
+  if (mp.unwatchCoop) { mp.unwatchCoop(); mp.unwatchCoop = null; }
+  coop.active = false; coop.players.clear(); coop.lastSnapshot = null;
+  setPlayUI(false);
+  MUSIC.setMode("hub");
+  game.state = "hub";
+  showMenu(menuLobby());
+}
+
+function updateCoopHost(dt) {
+  pollInput();
+  const me = coop.players.get(mp.playerId);
+  if (me) {
+    me.input.left = input.left; me.input.right = input.right; me.input.jumpHeld = input.jumpHeld;
+    if (input.jumpPressed) { me.jumpSeq++; input.jumpPressed = false; }
+  }
+  for (const p of coop.players.values()) if (p.alive) stepPlayerEntity(p, dt);
+  updateCoopWorld(dt);
+
+  let maxX = 100;
+  for (const p of coop.players.values()) if (p.x > maxX) maxX = p.x;
+  while ((maxX + 3 * CHUNK_W) > (world.built + 1) * CHUNK_W) buildChunkAndBroadcast(world.built + 1);
+
+  coop.tick++;
+  const now = performance.now();
+  if (now - coop.lastSnapshotT >= 1000 / 15) {
+    coop.lastSnapshotT = now;
+    MP.broadcastCoopSnapshot(mp.sessionId, {
+      tick: coop.tick,
+      players: Array.from(coop.players.values()).map(p => ({
+        id: p.id, x: p.x, y: p.y, vx: p.vx, vy: p.vy, face: p.face,
+        onGround: p.onGround, slide: p.slide, squash: p.squash,
+        star: p.star > 0, hearts: p.hearts, alive: p.alive,
+      })),
+      coinsGot: coop.gotCoins, pickupsGot: coop.gotPickups,
+      enemies: world.enemies.map(e => ({ id: e._id, x: e.x, y: e.y, dead: e.dead })),
+    });
+    coop.gotCoins = []; coop.gotPickups = [];
+  }
+}
+
+/* ---- Stage 2: shared world simulation, host-only. Ported from updatePlay's
+   enemy/coin/hazard/mover/pickup/ring blocks, looping over every alive
+   PlayerEntity instead of the singular `player`. Coins/bricks are credited
+   to whoever actually touched them (agreed with the user: individual
+   credit, not a shared pot). The magical carrot's rainbow-ride minigame
+   isn't supported here yet -- it just pays out a coin bonus instead. ---- */
+function updateCoopWorld(dt) {
+  for (const e of world.enemies) {
+    if (e.dead) { e.dead += dt; continue; }
+    e.t += dt;
+    if (e.kind === "7") {
+      e.hopT -= dt;
+      if (e.onGround && e.hopT <= 0) { e.vy = -600; e.hopT = 1.1 + Math.random() * 0.6; e.onGround = false; }
+    }
+    const before = e.vx;
+    const r = moveBody(e, dt);
+    e.onGround = r.ground;
+    if (r.wall) e.vx = -before;
+    if (r.ground) {
+      const ahead = e.x + (e.vx > 0 ? e.w + 4 : -4);
+      if (!isSolidPx(ahead, e.y + e.h + 6)) e.vx = -e.vx;
+    }
+    if (e.vx === 0) e.vx = (Math.random() < 0.5 ? -1 : 1) * 55;
+
+    for (const p of coop.players.values()) {
+      if (!p.alive || !overlap(p, e)) continue;
+      const fell = p.vy > 60 && (p.prevY + p.h) <= e.y + 14;
+      if (p.star > 0 && !fell) {
+        e.dead = 0.001; e.vx = 0;
+        p.stomps++; p.money += 5; game.shake = 5;
+        floatText(e.x + e.w/2, e.y, "+5", "#ffe97a");
+        burst(e.x + e.w/2, e.y + e.h/2, "#ffe97a", 14);
+      } else if (fell) {
+        e.dead = 0.001; e.vx = 0;
+        p.combo++;
+        const pay = 5 * p.combo;
+        p.vy = -STOMP_BOUNCE - Math.min(120, p.combo * 22);
+        p.squash = -0.4; p.airJumps = 1;
+        p.stomps++; p.money += pay; game.shake = 6;
+        floatText(e.x + e.w/2, e.y, p.combo > 1 ? "+" + pay + "  x" + p.combo + "!" : "+" + pay,
+                  p.combo > 1 ? "#ff7fb0" : "#fff");
+        burst(e.x + e.w/2, e.y + e.h/2, e.kind === "6" ? "#ffc7de" : "#c9d8ff", 8 + p.combo * 4);
+      } else hurtP(p);
+      break;   // first-alive-match-wins, avoids double-payout in the same tick
+    }
+  }
+  for (let i = world.enemies.length - 1; i >= 0; i--) {
+    if (world.enemies[i].dead && world.enemies[i].dead > 0.45) world.enemies.splice(i, 1);
+  }
+
+  for (const c of world.coins) {
+    if (c.got) continue;
+    c.t += dt;
+    for (const p of coop.players.values()) {
+      if (!p.alive) continue;
+      const dx = (p.x + p.w/2) - c.x, dy = (p.y + p.h/2) - c.y;
+      if (dx*dx + dy*dy < 30*30) {
+        c.got = true; p.coins++; p.money++; S.coin();
+        burst(c.x, c.y, "#ffe07a", 7, 150);
+        coop.gotCoins.push(c._id);
+        break;
+      }
+    }
+  }
+
+  for (const hz of world.hazards) {
+    hz.t += dt;
+    for (const p of coop.players.values()) {
+      if (!p.alive || p.star > 0) continue;
+      if (p.x + p.w - 5 > hz.x - 15 && p.x + 5 < hz.x + 15 && p.y + p.h > hz.y - 14 && p.y < hz.y + 17) hurtP(p);
+    }
+  }
+
+  // bricks (X) and planks (=) -- interactive on the host; a guest sees the
+  // tile itself change via the "tile" broadcast, see bumpBrickFor/below
+  for (const m of world.movers) {
+    if (m.kind === "X") {
+      if (m.shake > 0) m.shake = Math.max(0, m.shake - dt);
+    } else if (m.kind === "P") {
+      if (m.state === "solid") {
+        const top = m.y - TILE/2;
+        let standing = false;
+        for (const p of coop.players.values()) {
+          if (p.alive && p.onGround && p.x + p.w > m.x - TILE/2 + 2 && p.x < m.x + TILE/2 - 2 &&
+              Math.abs((p.y + p.h) - top) < 7) standing = true;
+        }
+        if (standing) { m.state = "shake"; m.timer = WOOD_SHAKE; S.creak(); }
+      } else if (m.state === "shake") {
+        m.timer -= dt;
+        if (m.timer <= 0) {
+          setTile(m.ci, m.row, m.col, ".");
+          MP.broadcastCoopTile(mp.sessionId, { index: m.ci, row: m.row, col: m.col, ch: "." });
+          m.state = "fall"; m.timer = WOOD_BACK; m.fy = 0; m.vy = 0;
+          burst(m.x, m.y, "#c9a06a", 12, 170);
+        }
+      } else {
+        m.timer -= dt; m.vy += 1500 * dt; m.fy += m.vy * dt;
+        if (m.timer <= 0) {
+          setTile(m.ci, m.row, m.col, "=");
+          MP.broadcastCoopTile(mp.sessionId, { index: m.ci, row: m.row, col: m.col, ch: "=" });
+          m.state = "solid"; m.fy = 0; m.vy = 0;
+        }
+      }
+    }
+    // droppers/rolling cheese/bouncing berries/trampoline (F/W/Z/T) are not
+    // simulated in the shared arena yet -- host-only follow-up
+  }
+
+  for (const pk of world.pickups) {
+    if (pk.got) continue;
+    pk.t += dt;
+    for (const p of coop.players.values()) {
+      if (!p.alive) continue;
+      const dx = (p.x + p.w/2) - pk.x, dy = (p.y + p.h/2) - pk.y;
+      if (dx*dx + dy*dy < 34*34) {
+        pk.got = true;
+        if (pk.kind === "carrot") { p.money += 20; floatText(pk.x, pk.y - 20, "+20", "#ffd36b"); }
+        else grabStarFor(p, pk.x, pk.y);
+        coop.gotPickups.push(pk._id);
+        break;
+      }
+    }
+  }
+
+  for (const rg of world.rings) {
+    rg.a += dt * 2.2; rg.y = rg.base + Math.sin(rg.a * 0.8) * 34;
+    for (const p of coop.players.values()) {
+      if (!p.alive || p.star > 0) continue;
+      const dx = (p.x + p.w/2) - rg.x, dy = (p.y + p.h/2) - rg.y;
+      if (dx*dx + dy*dy < 30*30) hurtP(p);
+    }
+  }
+}
+
+function updateCoopGuest(dt) {
+  pollInput();
+  if (input.jumpPressed) { coop.myJumpSeq++; input.jumpPressed = false; }
+  const cur = { left: input.left, right: input.right, jumpHeld: input.jumpHeld };
+  const changed = !coop.lastSentInput ||
+    cur.left !== coop.lastSentInput.left || cur.right !== coop.lastSentInput.right || cur.jumpHeld !== coop.lastSentInput.jumpHeld;
+  const now = performance.now();
+  if (changed || now - coop.lastInputSentT > 100) {
+    coop.lastInputSentT = now; coop.lastSentInput = cur;
+    MP.broadcastCoopInput(mp.sessionId, { playerId: mp.playerId, ...cur, jumpSeq: coop.myJumpSeq });
+  }
+}
+
+function renderCoop(t, dt) {
+  const players = mp.isCoopHost
+    ? Array.from(coop.players.values())
+    : (coop.lastSnapshot ? coop.lastSnapshot.players : []);
+  const me = players.find(p => p.id === mp.playerId);
+  if (!me) { drawSky(coop.camX, t); return; }
+
+  const targetCamX = Math.max(me.x - 340, -460);
+  coop.camX += (targetCamX - coop.camX) * Math.min(1, dt * 6);
+  const camX = coop.camX;
+
+  ctx.save();
+  drawSky(camX, t);
+  drawTiles(camX);
+  for (const hz of world.hazards) if (hz.x > camX - 60 && hz.x < camX + W + 60) drawHazard(hz, camX, t);
+  drawCoins(camX, t);
+  for (const rg of world.rings) if (rg.x > camX - 60 && rg.x < camX + W + 60) drawRing(rg, camX);
+  for (const m of world.movers) if (m.x > camX - 80 && m.x < camX + W + 80) drawMover(m, camX, t);
+  for (const pk of world.pickups) {
+    if (pk.got || pk.x < camX - 90 || pk.x > camX + W + 90) continue;
+    pk.kind === "star" ? drawStar(pk, camX, t) : drawCarrot(pk, camX, t);
+  }
+  for (const e of world.enemies) if (e.x > camX - 80 && e.x < camX + W + 80) drawEnemy(e, camX, t);
+  for (const p of players) {
+    if (p.alive === false) continue;
+    // guests don't receive `anim` (host's real one) over the wire -- it's
+    // just a run-cycle phase, so re-derive it locally the same way solo
+    // play accumulates it (index.html ~1240), keyed per remote player id
+    let anim = p.anim;
+    if (!mp.isCoopHost) {
+      anim = (coop.remoteAnim.get(p.id) || 0) + dt * (p.onGround ? Math.abs(p.vx) / 42 : 4);
+      coop.remoteAnim.set(p.id, anim);
+    }
+    if (p.star) {
+      ctx.save(); ctx.globalAlpha = 0.85;
+      ctx.strokeStyle = RAINBOW_COLS[Math.floor(t * 14) % RAINBOW_COLS.length];
+      ctx.lineWidth = 3.5;
+      ctx.beginPath(); ctx.ellipse(p.x + p.w/2 - camX, p.y + p.h/2 - 3, 25, 26, 0, 0, 7); ctx.stroke();
+      ctx.restore();
+    }
+    drawDumplingHero(p.x + p.w/2 - camX, p.y + p.h, 1, t, {
+      run: anim, air: p.onGround ? 0 : 1,
+      squash: p.squash || 0, face: p.face || 1, slide: !!p.slide,
+      palette: CLASSIC_PALETTE, accessory: null,
+    });
+  }
+  drawParticles(camX);
+  ctx.font = "900 20px ui-rounded,system-ui,sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const tx of world.texts) {
+    ctx.globalAlpha = Math.max(0, 1 - tx.life / tx.max);
+    ctx.lineWidth = 4; ctx.strokeStyle = "rgba(90,74,102,.55)";
+    ctx.strokeText(tx.txt, tx.x - camX, tx.y);
+    ctx.fillStyle = tx.color; ctx.fillText(tx.txt, tx.x - camX, tx.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
 }
 
 function mpOnTradeRow(row) {
@@ -3428,6 +3947,8 @@ sheetEl.addEventListener("click", e => {
       if (sid) MP.leaveRoom(sid).catch(() => {});
       break;
     }
+    case "mpStartCoop": mpStartCoopHost(); break;
+    case "mpLeaveCoop": leaveCoop(); break;
     case "mpTradeWith": {
       const otherPlayerId = el.dataset.id;
       const other = mp.roster.find(p => p.playerId === otherPlayerId);
@@ -3492,7 +4013,10 @@ function toggleMute() {
 muteBtn.textContent = save.muted ? "🔇" : "🔊";
 muteBtn.addEventListener("click", () => { audioOn(); toggleMute(); });
 const pauseBtn = document.getElementById("btnPause");
-pauseBtn.addEventListener("click", () => { audioOn(); S.click(); togglePause(); });
+pauseBtn.addEventListener("click", () => {
+  audioOn(); S.click();
+  if (game.state === "coop") leaveCoop(); else togglePause();
+});
 
 /* ==========================================================================
    MAIN LOOP
@@ -3510,6 +4034,16 @@ function frame(now) {
   } else if (game.state === "paused") {
     acc = 0;
     renderPlay(game.t);
+  } else if (game.state === "coop") {
+    if (mp.isCoopHost) {
+      acc += dt;
+      let guard = 0;
+      while (acc >= STEP && guard++ < 40) { updateCoopHost(STEP); acc -= STEP; }
+    } else {
+      acc = 0;
+      updateCoopGuest(dt);
+    }
+    renderCoop(game.t, dt);
   } else if (game.state === "hatch") {
     renderHatch(game.t, dt);
   } else {
@@ -3523,7 +4057,9 @@ window.__SE = { game, save, player, run, world, startRun, goHub, beginHatch, per
                 rainbowY, startRainbow, endRainbow, buildChunk, resetWorld, grabStar, VERSION,
                 tileAtPx, isSolidPx, bumpBrick, equippedPower,
                 PALETTES, ACCESSORIES, currentPalette, squishyPalette, accessoryUnlocked,
-                SQUISHIES, EGGS, TEMPLATES, grant, input, reset(){ localStorage.removeItem(SAVE_KEY); location.reload(); } };
+                SQUISHIES, EGGS, TEMPLATES, grant, input, reset(){ localStorage.removeItem(SAVE_KEY); location.reload(); },
+                mp, coop, mpStartCoopHost, mpStartCoopGuest, leaveCoop, updateCoopHost, updateCoopGuest, renderCoop,
+                updateCoopWorld, hurtP, grabStarFor, bumpBrickFor, eliminatePlayerCoop, stepPlayerEntity, makePlayerEntity };
 
 /* first boot: the common egg from the spec, free, hatching on its own */
 resetWorld();
