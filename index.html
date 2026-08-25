@@ -1058,6 +1058,7 @@ const coop = {
   myJumpSeq: 0,
   remoteAnim: new Map(),  // guest-side only: locally-accumulated run-cycle phase per remote player id
   gotCoins: [], gotPickups: [],  // host-only: newly-collected ids since the last snapshot
+  over: false, overT: 0, resultsShown: false,
 };
 
 function makePlayerEntity(playerId, nickname, cosmetics) {
@@ -1069,7 +1070,7 @@ function makePlayerEntity(playerId, nickname, cosmetics) {
     slide:false, slopeDir:0, lastSlope:0, slopeGrace:0, runT:0, runDir:0,
     power: cosmetics.power || null, flyFuel: FLY_TIME, flying:false,
     alive:true, eliminated:null,
-    money:0, coins:0, stomps:0,
+    money:0, coins:0, stomps:0, maxX:100,
     input: { left:false, right:false, jumpHeld:false },
     jumpSeq:0, lastJumpSeqSeen:0,
   };
@@ -1302,6 +1303,7 @@ function stepPlayerEntity(p, dt) {
 
   p.anim += dt * (p.onGround ? Math.abs(p.vx) / 42 : 4);
   p.squash += (0 - p.squash) * Math.min(1, dt * 12);
+  p.maxX = Math.max(p.maxX, p.x);
 }
 
 /* ---- Stage 2: per-player damage/scoring actions, credited individually ---- */
@@ -3276,6 +3278,7 @@ function mpStartCoopHost() {
   coop.tick = 0; coop.lastSnapshotT = 0; coop.camX = 0; coop.active = true;
   coop.gotCoins = []; coop.gotPickups = [];
   coop.wall = { x: -420, dist: 0, maxX: 100 };
+  coop.over = false; coop.overT = 0; coop.resultsShown = false;
   game.state = "coop";
   setPlayUI(true);
   showMenu(null);
@@ -3296,12 +3299,17 @@ function mpStartCoopGuest() {
   coop.players.clear();
   coop.lastSnapshot = null; coop.camX = 0; coop.active = true;
   coop.wall = { x: -420, dist: 0, maxX: 100 };
+  coop.over = false; coop.overT = 0; coop.resultsShown = false;
   clearWorldForCoopGuest();  // clears any stale local world; chunks arrive for real via onChunk below
   game.state = "coop";
   setPlayUI(true);
   showMenu(null);
   mp.unwatchCoop = MP.watchCoop(mp.sessionId, {
-    onSnapshot: snap => { applyCoopSnapshotToWorld(snap); coop.lastSnapshot = snap; },
+    onSnapshot: snap => {
+      applyCoopSnapshotToWorld(snap);
+      coop.lastSnapshot = snap;
+      if (snap.over && !coop.resultsShown) { coop.resultsShown = true; coopShowResults(); }
+    },
     onChunk: chunk => {
       world.tiles.set(chunk.index, chunk.tiles);
       world.built = Math.max(world.built, chunk.index);
@@ -3327,6 +3335,60 @@ function applyCoopSnapshotToWorld(snap) {
     if (e) { e.x = es.x; e.y = es.y; e.dead = es.dead; }
   }
   if (snap.wall) { coop.wall.x = snap.wall.x; coop.wall.dist = snap.wall.dist; }
+}
+
+/* ---- Stage 4: results screen. Reuses menuGameOver()'s stat-block pattern,
+   one row per player instead of one. Each client pushes its OWN final score
+   independently -- player_saves RLS only lets you update your own row, the
+   host can't post scores on a guest's behalf (see multiplayer.js). ---- */
+function coopShowResults() {
+  const players = mp.isCoopHost ? Array.from(coop.players.values()) : (coop.lastSnapshot ? coop.lastSnapshot.players : []);
+  const me = players.find(p => p.id === mp.playerId);
+  if (me) {
+    const dist = Math.max(0, Math.floor(((me.maxX || 100) - 100) / TILE));
+    save.bestDist = Math.max(save.bestDist, dist);
+    save.bestMoney = Math.max(save.bestMoney, me.money || 0);
+    save.money += me.money || 0; save.runs++;
+    persist();
+    if (save.cloudPlayerId) {
+      if (window.MP && MP.available()) {
+        MP.updateSave({ best_dist: save.bestDist, best_money: save.bestMoney, money: save.money, runs: save.runs })
+          .then(() => { mp.syncNotice = null; })
+          .catch(err => {
+            if (err && err.code === "not_registered") {
+              save.cloudPlayerId = null; save.cloudNickname = null; persist();
+              mp.playerId = null; mp.nickname = null;
+              mp.syncNotice = "⚠️ You got signed out — tap Sign Up on the hub to log back in.";
+            } else {
+              mp.syncNotice = "⚠️ Your last score didn't save online — try signing in again.";
+            }
+          });
+      } else {
+        mp.syncNotice = "⚠️ Couldn't reach the leaderboard to save your score (you're still saved locally).";
+      }
+    }
+  }
+  showMenu(menuCoopResults());
+}
+
+function menuCoopResults() {
+  const players = mp.isCoopHost ? Array.from(coop.players.values()) : (coop.lastSnapshot ? coop.lastSnapshot.players : []);
+  const rows = players.map(p => {
+    const dist = Math.max(0, Math.floor(((p.maxX || 100) - 100) / TILE));
+    const cause = p.eliminated === "wall" ? "🌊 Caught by the wall"
+                : p.eliminated === "hearts" ? "💔 Out of hearts" : "🏁 Still going";
+    return `
+    <div class="stats">
+      <div class="stat">👤<b>${escapeHtml(p.nickname || "?")}</b>${p.id === mp.playerId ? "you" : "player"}</div>
+      <div class="stat">📏<b>${dist} m</b>distance</div>
+      <div class="stat money">🪙<b>${p.money || 0}</b>coins</div>
+      <div class="stat">${cause}</div>
+    </div>`;
+  }).join("");
+
+  return `<h2>🏁 Run Complete!</h2>
+    ${rows}
+    <div class="btns"><button class="primary" data-act="mpLeaveCoop">🚪 Back to Lobby</button></div>`;
 }
 
 function leaveCoop() {
@@ -3369,6 +3431,14 @@ function updateCoopHost(dt) {
     }
   }
 
+  /* ---- run over: everyone eliminated. Same dramatic beat as solo's
+     `run.over && run.endT > 1.1` before showGameOver(). ---- */
+  if (!anyAlive && !coop.over) { coop.over = true; coop.overT = 0; }
+  if (coop.over) {
+    coop.overT += dt;
+    if (coop.overT > 1.1 && !coop.resultsShown) { coop.resultsShown = true; coopShowResults(); }
+  }
+
   coop.tick++;
   const now = performance.now();
   if (now - coop.lastSnapshotT >= 1000 / 15) {
@@ -3376,10 +3446,11 @@ function updateCoopHost(dt) {
     MP.broadcastCoopSnapshot(mp.sessionId, {
       tick: coop.tick,
       wall: { x: coop.wall.x, dist: coop.wall.dist },
+      over: coop.over,
       players: Array.from(coop.players.values()).map(p => ({
-        id: p.id, x: p.x, y: p.y, vx: p.vx, vy: p.vy, face: p.face,
-        onGround: p.onGround, slide: p.slide, squash: p.squash,
-        star: p.star > 0, hearts: p.hearts, alive: p.alive, eliminated: p.eliminated,
+        id: p.id, nickname: p.nickname, x: p.x, y: p.y, vx: p.vx, vy: p.vy, face: p.face,
+        onGround: p.onGround, slide: p.slide, squash: p.squash, maxX: p.maxX,
+        star: p.star > 0, hearts: p.hearts, alive: p.alive, eliminated: p.eliminated, money: p.money,
       })),
       coinsGot: coop.gotCoins, pickupsGot: coop.gotPickups,
       enemies: world.enemies.map(e => ({ id: e._id, x: e.x, y: e.y, dead: e.dead })),
