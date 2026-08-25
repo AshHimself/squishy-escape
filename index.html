@@ -3126,9 +3126,10 @@ function menuLobby() {
     ${mp.notice ? `<p class="sub">${escapeHtml(mp.notice)}</p>` : ""}
     ${mp.error ? `<p class="sub" style="color:#c0392b;font-weight:800">${escapeHtml(mp.error)}</p>` : ""}
     <div class="btns">
-      ${mp.roster.length >= 2 ? `<button class="primary" data-act="mpStartCoop">▶ Play Together</button>` : ""}
+      <button class="primary" data-act="mpStartCoop" ${mp.roster.length >= 2 ? "" : "disabled"}>▶ Play Together</button>
       <button data-act="mpLeaveRoom">🚪 Leave Room</button><button data-act="hub">Back</button>
-    </div>`;
+    </div>
+    ${mp.roster.length < 2 ? `<p class="sub">Waiting for a friend to join before you can play together</p>` : ""}`;
 }
 
 function menuTradeSession() {
