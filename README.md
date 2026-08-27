@@ -355,6 +355,34 @@ browser — there's no separate backend server or serverless function. See
 `multiplayer.js` for the client side and `supabase/migrations/` for the
 database schema.
 
+### Leaderboard anti-cheat
+
+The best-distance leaderboard reads `player_saves.best_dist` / `best_money`,
+and those two columns are **not writable from the browser** — direct `UPDATE`
+on them is revoked from the `authenticated` role
+(`supabase/migrations/0013_vac_score_submission.sql`). A score only lands on
+the board through `submit_score()`, a `security definer` RPC that:
+
+- range-checks the run against ceilings in the `score_limits` table (max
+  distance, max coins-per-metre, min milliseconds-per-metre using a
+  client-measured run timer),
+- rate-limits submissions per player (a minimum gap between accepted scores
+  and a rolling hourly cap), and
+- writes an audit row to `player_score_audit` for every accepted **and**
+  rejected call.
+
+A rejected run stays saved locally; it just doesn't reach the board. The
+thresholds are deliberately loose (the dumpling tops out near 9 m/s, so they
+only bite on tampering) and live in a table so they can be widened with a
+single `UPDATE` if a genuine run ever trips one — no redeploy.
+
+This stops drive-by console tampering (`MP.updateSave({ best_dist: 9e9 })`
+used to work) and absurd values. It does **not** stop a hand-crafted
+`submit_score()` call with in-range lies — the sim still runs in the browser
+and the anon key is public, so fully trustworthy scores would need the run
+itself simulated server-side, which this one-file game has no backend for.
+`player_score_audit` is what a later pass would mine to catch that.
+
 ### Setting up your own Supabase project
 
 1. Create a free project at [supabase.com](https://supabase.com).
@@ -376,6 +404,13 @@ a second environment: `index.html?sb=https://xxx.supabase.co&key=xxxx`.
 
 The version is shown on the main menu, under the title.
 
+- **v1.8.2** — leaderboard anti-cheat. `player_saves.best_dist` / `best_money`
+  can no longer be written directly from the browser; scores only reach the
+  board through the `submit_score()` RPC, which sanity-checks each run
+  (distance/coin ceilings, a run-timer speed check), rate-limits per player,
+  and audits every call. Any values already sitting above the ceilings from
+  the old direct-write path are clamped on migrate. See "Leaderboard
+  anti-cheat" above.
 - **v1.8.1** — the trampoline launches much higher (high enough that the
   camera now pans vertically to keep the ground out of view entirely), and
   its sky coins are spawned fresh per bounce and cleared afterward rather

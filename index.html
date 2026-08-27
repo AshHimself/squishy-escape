@@ -184,7 +184,7 @@
 "use strict";
 
 /* ------------------------------ constants ------------------------------ */
-const VERSION = "1.8.1";           // major.minor.patch -- bump minor for features
+const VERSION = "1.8.2";           // major.minor.patch -- bump minor for features
 
 const W = 960, H = 540;            // virtual resolution
 const TILE = 45;                   // tile size
@@ -571,6 +571,11 @@ function grant(sq) {
   save.counts[sq.id] = (save.counts[sq.id] || 0) + 1;
   if (!save.equipped) save.equipped = sq.id;
   persist();
+  // keep cloud inventory in step with this hatch (registered + online only);
+  // best-effort -- the local count above is what actually matters offline
+  if (save.cloudPlayerId && window.MP && MP.available()) {
+    MP.adjustInventory({ [sq.id]: 1 }).catch(() => {});
+  }
 }
 const owned = id => (save.counts[id] || 0) > 0;
 const distinctOwned = () => SQUISHIES.filter(s => owned(s.id)).length;
@@ -1038,7 +1043,7 @@ const player = { x:100, y:455, w:30, h:40, vx:0, vy:0, prevY:455, onGround:false
                  face:1, coyote:0, buffer:0, iframes:0, hearts:3, anim:0, squash:0, combo:0, airJumps:1, star:0,
                  slide:false, slopeDir:0, lastSlope:0, slopeGrace:0, slideSfx:0, runT:0, runDir:0,
                  power:null, flyFuel:FLY_TIME, flying:false, cloudMusic:0 };
-const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, camY:0, over:false, endT:0, rainbow:null };
+const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, camY:0, over:false, endT:0, startMs:0, rainbow:null };
 const trail  = [];   // breadcrumb positions so the companion squishy can follow
 
 function startRun() {
@@ -1053,6 +1058,7 @@ function startRun() {
   player.cloudMusic = 0;
   run.money = run.coins = run.stomps = run.dist = 0;
   run.maxX = 100; run.wallX = -420; run.camX = 0; run.camY = 0; run.over = false; run.endT = 0;
+  run.startMs = performance.now();   // wall-clock length of the run, for the leaderboard's speed check
   run.rainbow = null;
   run.nextMilestone = MILESTONES[0];
   world.milestone = null;
@@ -1080,28 +1086,50 @@ function endRun(cause) {
   run.money += bonus; run.bonus = bonus; run.cause = cause;
   save.money += run.money;
   save.runs++;
+  const newBest = run.dist > save.bestDist || run.money > save.bestMoney;
   save.bestDist  = Math.max(save.bestDist, run.dist);
   save.bestMoney = Math.max(save.bestMoney, run.money);
   persist();
   // post the new score to the leaderboard, registered players only -- any
   // failure surfaces as mp.syncNotice next time the hub renders, rather
-  // than silently doing nothing
+  // than silently doing nothing.
+  //
+  // Two separate writes now: the un-ranked cloud mirror (money/runs) goes
+  // straight to player_saves, but the leaderboard numbers can only enter
+  // through MP.submitScore() -- the backend won't accept best_dist /
+  // best_money any other way. We hand it this run's distance, take, and
+  // measured length so it can sanity-check the run before it counts.
   if (save.cloudPlayerId) {
     if (window.MP && MP.available()) {
-      MP.updateSave({ best_dist: save.bestDist, best_money: save.bestMoney, money: save.money, runs: save.runs })
-        .then(() => { mp.syncNotice = null; })
-        .catch(err => {
-          if (err && err.code === "not_registered") {
-            // this device's sign-in doesn't actually exist any more (e.g. it
-            // expired, or this profile got logged in from elsewhere) -- the
-            // hub was falsely claiming "signed in", so clear that and say why
-            save.cloudPlayerId = null; save.cloudNickname = null; persist();
-            mp.playerId = null; mp.nickname = null;
-            mp.syncNotice = "⚠️ You got signed out, so this run didn't save — tap Sign Up on the hub to log back in.";
+      const runMs = Math.round(performance.now() - (run.startMs || performance.now()));
+      const onErr = err => {
+        if (err && err.code === "not_registered") {
+          // this device's sign-in doesn't actually exist any more (e.g. it
+          // expired, or this profile got logged in from elsewhere) -- the
+          // hub was falsely claiming "signed in", so clear that and say why
+          save.cloudPlayerId = null; save.cloudNickname = null; persist();
+          mp.playerId = null; mp.nickname = null;
+          mp.syncNotice = "⚠️ You got signed out, so this run didn't save — tap Sign Up on the hub to log back in.";
+        } else {
+          mp.syncNotice = "⚠️ Your last score didn't save online — try signing in again.";
+        }
+      };
+      MP.updateSave({ money: save.money, runs: save.runs }).catch(onErr);
+      MP.submitScore(run.dist, run.money, runMs)
+        .then(res => {
+          if (res.accepted) {
+            mp.syncNotice = null;
+          } else if (!newBest) {
+            // a rejected run that wasn't going to beat the board anyway --
+            // nothing lost, stay quiet.
+          } else if (res.reason === "too_soon" || res.reason === "rate_limited") {
+            mp.syncNotice = "⚠️ That run was too quick after the last one to count on the leaderboard.";
           } else {
-            mp.syncNotice = "⚠️ Your last score didn't save online — try signing in again.";
+            // out-of-range / implausible: kept locally, off the board.
+            mp.syncNotice = "⚠️ That score looked off to the leaderboard, so it wasn't added.";
           }
-        });
+        })
+        .catch(onErr);
     } else {
       mp.syncNotice = "⚠️ Couldn't reach the leaderboard to save your score (you're still saved locally).";
     }
@@ -3119,6 +3147,19 @@ function menuTradeSession() {
     </div>`;
 }
 
+/* Push the local personal best up through the backend's checked path. Used
+   when a player signs in / is recognised, so a best set while offline still
+   reaches the board -- fresh runs go through endRun() instead. No run
+   duration to give here (this is a lifetime best, not one run), so the
+   speed check is skipped server-side; the range + coins/metre bounds still
+   apply. Fire-and-forget: a rejection just means it stays local. */
+function syncBestScore() {
+  if (!(save.cloudPlayerId && window.MP && MP.available() && save.bestDist > 0)) return;
+  MP.submitScore(save.bestDist, save.bestMoney, null)
+    .then(res => { if (res.accepted) mp.syncNotice = null; })
+    .catch(() => {});
+}
+
 async function mpOpenEntry() {
   if (!(window.MP && MP.available())) { showMenu(menuHub()); return; }
   mp.error = null; mp.busy = true;
@@ -3129,6 +3170,7 @@ async function mpOpenEntry() {
     if (who) {
       mp.playerId = who.playerId; mp.nickname = who.nickname;
       save.cloudPlayerId = who.playerId; save.cloudNickname = who.nickname; persist();
+      syncBestScore();
       showMenu(menuLobby());
     } else {
       mp.authMode = "register";
@@ -3153,6 +3195,7 @@ async function mpAuthSubmit() {
     mp.busy = false;
     mp.playerId = who.playerId; mp.nickname = who.nickname;
     save.cloudPlayerId = who.playerId; save.cloudNickname = who.nickname; persist();
+    syncBestScore();
     showMenu(menuLobby());
   } catch (err) {
     mp.busy = false; mp.error = err.message || "Something went wrong.";
@@ -3164,12 +3207,23 @@ async function mpEnterRoom(action) {
   mp.busy = true; mp.error = null;
   showMenu(menuMPLoading("Just a sec…"));
   try {
-    // push local squishy counts + settings up before anyone can trade with us
-    await MP.pushInventory(save.counts, {
+    // push local squishy counts + settings up before anyone can trade with us.
+    // best_dist / best_money are deliberately not here -- they're leaderboard
+    // -ranked and only move through MP.submitScore() (see syncBestScore).
+    const merged = await MP.pushInventory(save.counts, {
       money: save.money, egg_tier: save.eggTier, equipped: save.equipped,
-      best_dist: save.bestDist, best_money: save.bestMoney, runs: save.runs,
-      muted: save.muted, skin: save.skin, accessory: save.accessory,
+      runs: save.runs, muted: save.muted, skin: save.skin, accessory: save.accessory,
     });
+    // sync_inventory folds this device's collection into the cloud and hands
+    // back the union -- adopt it so squishies hatched on another device show
+    // up here too. It only ever adds (additive merge), never removes.
+    if (merged && Object.keys(merged).length) {
+      for (const [id, qty] of Object.entries(merged)) {
+        save.counts[id] = Math.max(save.counts[id] || 0, qty);
+      }
+      persist();
+    }
+    syncBestScore();
     const room = await action();
     mp.sessionId = room.sessionId; mp.code = room.code;
     mp.roster = await MP.fetchRoster(mp.sessionId);
@@ -3536,11 +3590,17 @@ sheetEl.addEventListener("click", e => {
       const t = +el.dataset.t;
       if (dupesOfRarity(t) < 3) break;
       let need = 3;
+      const spent = {};
       for (const s of SQUISHIES) {
         if (s.r !== t || need === 0) continue;
         const spare = Math.max(0, (save.counts[s.id] || 0) - 1);
         const take = Math.min(spare, need);
         save.counts[s.id] -= take; need -= take;
+        if (take > 0) spent[s.id] = -take;
+      }
+      // mirror the consumed dupes to cloud inventory (registered + online only)
+      if (Object.keys(spent).length && save.cloudPlayerId && window.MP && MP.available()) {
+        MP.adjustInventory(spent).catch(() => {});
       }
       if (t === RARITY.length - 1) { save.money += 800; persist(); showMenu(menuTrader()); S.coin(); }
       else {

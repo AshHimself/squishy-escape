@@ -40,6 +40,9 @@
     trade_not_negotiating: "That trade already finished.",
     not_a_party: "That's not your trade.",
     insufficient_qty: "Looks like an offer changed — check what you have.",
+    bad_offer: "That offer doesn't look right — try picking your squishies again.",
+    bad_inventory: "Couldn't sync your squishies just now — they're safe on this device.",
+    rate_limited: "Too many changes too fast — wait a minute and try again.",
     code_gen_failed: "Couldn't make a room code — try again.",
     offline: "No internet connection — trading needs to be online.",
   };
@@ -228,35 +231,90 @@
 
   // --------------------------- inventory sync -------------------------------
 
-  // Updates this device's player_saves row (money/eggTier/bestDist/etc).
-  // Used both for the lobby's pre-trade sync and for silently posting a
-  // new high score after a run, if the player is registered.
+  // Updates this device's player_saves row -- the un-ranked cloud mirror of
+  // local save (money / eggTier / runs / settings). best_dist and best_money
+  // are leaderboard-ranked and are NOT writable this way any more: the
+  // database revokes UPDATE on those two columns (migration 0013), so
+  // including them here would get the whole statement rejected. They move
+  // only through submitScore(). Any caller still passing them has them
+  // stripped rather than failing.
   async function updateSave(saveFields) {
     if (!available()) throw new MPError("offline");
     const me = await whoami();
     if (!me) throw new MPError("not_registered");
+    const fields = { ...(saveFields || {}) };
+    delete fields.best_dist;
+    delete fields.best_money;
+    if (!Object.keys(fields).length) return;
     const { error } = await sb
       .from("player_saves")
-      .update({ ...saveFields, updated_at: new Date().toISOString() })
+      .update({ ...fields, updated_at: new Date().toISOString() })
       .eq("player_id", me.playerId);
     if (error) throw new MPError((error.message || "").trim());
   }
 
-  // Pushes non-zero local counts + save fields up before a trading session.
+  // The ONLY way a distance/coin score reaches the leaderboard. The backend
+  // (submit_score, migration 0013) range-checks the run, checks it against a
+  // coins-per-metre and a metres-per-second plausibility bound, rate-limits
+  // how often one player can submit, and logs every call. dist/money are
+  // this run's totals; runMs is the measured wall-clock length of the run
+  // (optional -- omit it and the speed check is skipped).
+  //
+  // Resolves { bestDist, bestMoney, accepted, reason }. `accepted:false` is
+  // not an error -- it means the run didn't make the board (reason is a
+  // short code, or the raw value if it looked tampered). Only a genuine
+  // precondition failure (not_registered / offline) throws.
+  async function submitScore(dist, money, runMs) {
+    const rows = await rpc("submit_score", {
+      p_dist: Math.max(0, Math.floor(dist || 0)),
+      p_money: Math.max(0, Math.floor(money || 0)),
+      p_run_ms: runMs == null ? null : Math.max(0, Math.floor(runMs)),
+    });
+    const row = Array.isArray(rows) ? rows[0] : rows;
+    return {
+      bestDist: row ? row.result_dist : 0,
+      bestMoney: row ? row.result_money : 0,
+      accepted: !!(row && row.accepted),
+      reason: row ? row.reason : "no_response",
+    };
+  }
+
+  // Reconcile this device's local counts into cloud inventory before a
+  // trading session, and push the save mirror. player_inventory has no
+  // direct write grant any more (migration 0015) -- this goes through the
+  // sync_inventory RPC, which is *additive*: it folds the local collection
+  // into the cloud (greatest per squishy) rather than overwriting, so a
+  // registered player never loses squishies by signing in on another
+  // device. Resolves to the reconciled {squishyId: qty} map so the caller
+  // can adopt anything the cloud knew about that this device didn't.
   async function pushInventory(counts, saveFields) {
     if (!available()) throw new MPError("offline");
-    const me = await whoami();
-    if (!me) throw new MPError("not_registered");
-
-    const rows = Object.entries(counts || {})
-      .filter(([, qty]) => qty > 0)
-      .map(([squishy_id, qty]) => ({ player_id: me.playerId, squishy_id, qty }));
-    if (rows.length) {
-      const { error } = await sb.from("player_inventory").upsert(rows);
-      if (error) throw new MPError((error.message || "").trim());
+    const clean = {};
+    for (const [id, qty] of Object.entries(counts || {})) {
+      if (qty > 0) clean[id] = Math.floor(qty);
     }
-
+    const rows = await rpc("sync_inventory", { p_counts: clean });
     if (saveFields) await updateSave(saveFields);
+    const merged = {};
+    for (const r of rows || []) merged[r.squishy_id] = r.qty;
+    return merged;
+  }
+
+  // Apply signed deltas to cloud inventory: { squishyId: +1 } after a local
+  // hatch, { squishyId: -2, ... } for a trade-up's consumed dupes. Keeps the
+  // cloud in step with local as the collection changes, so sync_inventory's
+  // additive merge stays tight. Best-effort -- callers fire and forget.
+  async function adjustInventory(deltas) {
+    const clean = {};
+    for (const [id, d] of Object.entries(deltas || {})) {
+      const n = Math.trunc(d);
+      if (n !== 0) clean[id] = n;
+    }
+    if (!Object.keys(clean).length) return {};
+    const rows = await rpc("adjust_inventory", { p_deltas: clean });
+    const merged = {};
+    for (const r of rows || []) merged[r.squishy_id] = r.qty;
+    return merged;
   }
 
   // Top players by best distance. No sign-in required to call this -- the
@@ -301,8 +359,10 @@
     cancelTrade,
     watchTrade,
     pushInventory,
+    adjustInventory,
     pullInventory,
     updateSave,
+    submitScore,
     getLeaderboard,
     MPError,
   };
