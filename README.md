@@ -3,13 +3,13 @@
 A 2D side-scroller by **Annie Smith & Ash Smith**.
 
 <p align="center">
-  <a href="https://ashhimself.github.io/squishy-escape/">
+  <a href="https://squishy-escape.vercel.app/">
     <img src="https://img.shields.io/badge/%E2%96%B6%20PLAY%20NOW-FF8FC0?style=for-the-badge&logoColor=white&labelColor=A98BE8" alt="Play Squishy Escape now">
   </a>
 </p>
 
 <p align="center">
-  <b><a href="https://ashhimself.github.io/squishy-escape/">ashhimself.github.io/squishy-escape</a></b>
+  <b><a href="https://squishy-escape.vercel.app/">squishy-escape.vercel.app</a></b>
 </p>
 
 Run right, jump the snacks, squash the 6-7s, outrun the squish wall, and bring
@@ -18,10 +18,13 @@ and trade your spares up with the Squishy Trader.
 
 ## Playing it
 
-Click **Play Now** above, or download `index.html` and double-click it. That's
-the whole install — one file, no build step, no downloads, and after the first
-load it doesn't need the internet at all. Works in Safari and Chrome on a Mac,
-and on an iPad (on-screen buttons appear the moment you touch the screen).
+Click **Play Now** above, or download `index.html` and double-click it — it's
+still a genuine single file, no build step needed to run it locally, and after
+the first load it doesn't need the internet at all. The live version deploys
+from this repo to [Vercel](https://squishy-escape.vercel.app/); the old
+`ashhimself.github.io/squishy-escape` link now just forwards there. Works in
+Safari and Chrome on a Mac, and on an iPad (on-screen buttons appear the
+moment you touch the screen).
 
 | Input | Does |
 | --- | --- |
@@ -455,6 +458,21 @@ itself simulated server-side, which this one-file game has no backend for.
 
 You can also point at a project without editing the file, e.g. for testing
 a second environment: `index.html?sb=https://xxx.supabase.co&key=xxxx`.
+
+## Deploying
+
+The live site is a Vercel project (`vercel.json` and `.vercel/` in this repo
+link it) deployed straight from this folder — there's no build step, it just
+serves `index.html` as-is. To push a change live:
+
+```bash
+vercel --prod
+```
+
+That's it — no GitHub integration is wired up, so pushing to `main` does
+**not** auto-deploy; running the command above is what actually publishes.
+`ashhimself.github.io/squishy-escape` is kept alive only as a redirect (its
+own `gh-pages` branch, decoupled from `main`) for anyone with the old link.
 
 ## Versions
 
