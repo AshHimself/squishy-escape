@@ -115,6 +115,23 @@ The dumpling glows with a cycling rainbow rim and the music switches to a fast
 The one thing the star does *not* save you from is the squish wall. That still
 ends the run, so keep moving.
 
+## The wall surges
+
+Every so often the squish wall does more than just creep — it telegraphs (a
+pulsing red flash and "WALL SURGE!" across the top of the screen), then, a
+little over a second later, bursts to more than double its normal speed for
+about two seconds before settling back down. It's on its own timer,
+independent of how close you actually are to it, so a surge can catch you
+even mid-obstacle. Outrunning one is the closest thing in the game to a
+dedicated "sprint now" moment.
+
+## The background changes day to day
+
+The sky, hills, and everything behind the course rotates through four looks —
+Sunny Day, Dusk, Night Sky (moon and stars), and Pastel Storm (rain, the
+occasional soft lightning flash) — picked once per calendar day, the same for
+everyone that day. Purely cosmetic; the course itself doesn't change.
+
 ## 🥕 The magical carrot
 
 Carrots no longer turn up at ground level. Every one is placed **up on a
@@ -281,11 +298,23 @@ Three rules so the course stays possible:
 - The constants at the top — `JUMP_V`, `MAX_RUN`, `GRAVITY`, `WALL_BASE`,
   `WALL_MAX` — control how it feels. Turn `WALL_BASE` down to make it kinder.
   `DOUBLE_V` is how strong the mid-air bounce is compared to a normal jump.
+  `COYOTE` and `JUMP_BUFFER` are the two forgiveness windows around a jump —
+  how long after walking off a ledge it still fires, and how early a press
+  still counts. `APEX_BAND` / `APEX_GRAVITY_MULT` control the hang-time at the
+  top of a jump (how wide the "near the top" window is, and how much weaker
+  gravity feels inside it) — this only ever affects the player, `moveBody`'s
+  gravity is a per-call parameter so enemies and movers are untouched.
+  `SURGE_MIN` / `SURGE_MAX` / `SURGE_WARN` / `SURGE_BURST` / `SURGE_MULT` tune
+  the wall's periodic surges — how often, how long the telegraph and the burst
+  each last, and how much faster the burst is. `THEMES` is the list of
+  background looks; add another entry (four colours, plus `sun`/`night`/`storm`
+  flags) and it joins the daily rotation automatically.
   `RUN_ACCEL` sets how quickly it gets up to speed, `SPRINT_RUN` how fast the
   wind-up sprint goes, and `SLIDE_ACCEL` / `SLIDE_MAX` how fierce a slope
   slide is. `WOOD_SHAKE` and `WOOD_BACK` are the plank's warning wobble and
   how long it takes to rebuild. `BRICK_HITS` is how many headbutts a brick takes to burst.
-  `WALL_BASE` / `WALL_GAIN` / `WALL_MAX` control how fast the squish wall is.
+  `WALL_BASE` / `WALL_GAIN` / `WALL_MAX` control the wall's steady speed
+  (separate from the surges above).
   `POWER_SPEED_MULT` / `POWER_JUMP_MULT` / `POWER_BIG_SCALE` / `FLY_TIME` /
   `FLY_LIFT` are the four superpowers' strength.
 - `SECTIONS` — the music. Each entry is 16 sixteenth-notes: `lead` is a list of
@@ -403,6 +432,13 @@ a second environment: `index.html?sb=https://xxx.supabase.co&key=xxxx`.
 ## Versions
 
 The version is shown on the main menu, under the title.
+
+- **v1.9.0** — a real hang-time at the top of a jump; landing and stomp-chain
+  screen shake now scale with how hard the impact actually was, instead of
+  being a flat amount every time; coyote time and jump buffer both a little
+  more forgiving; the squish wall now periodically telegraphs and bursts to
+  over double speed for a couple of seconds; the background rotates through
+  four looks (day/dusk/night/storm), one per calendar day.
 
 - **v1.8.2** — leaderboard anti-cheat. `player_saves.best_dist` / `best_money`
   can no longer be written directly from the browser; scores only reach the

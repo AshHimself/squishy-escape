@@ -184,7 +184,7 @@
 "use strict";
 
 /* ------------------------------ constants ------------------------------ */
-const VERSION = "1.8.2";           // major.minor.patch -- bump minor for features
+const VERSION = "1.9.0";           // major.minor.patch -- bump minor for features
 
 const W = 960, H = 540;            // virtual resolution
 const TILE = 45;                   // tile size
@@ -203,10 +203,12 @@ const SPRINT_RUN   = 405;    // keep running and you gradually wind up to this
 const SPRINT_AFTER = 0.85;   // seconds of holding a direction before it kicks in
 const SPRINT_RAMP  = 1.1;    // and how long the wind-up itself takes
 const MAX_FALL     = 1050;
-const COYOTE       = 0.10;   // grace period after walking off a ledge
+const COYOTE       = 0.13;   // grace period after walking off a ledge
 const DOUBLE_V     = 0.86;   // the mid-air bounce, as a fraction of a full jump
-const JUMP_BUFFER  = 0.12;   // press jump slightly early and it still fires
+const JUMP_BUFFER  = 0.15;   // press jump slightly early and it still fires
 const STOMP_BOUNCE = 625;
+const APEX_BAND    = 90;    // |vy| below this counts as "near the top of the arc"
+const APEX_GRAVITY_MULT = 0.55;   // a real hang-time float, Mario/Celeste-style
 const IFRAMES      = 1.4;
 const MAX_HEARTS   = 5;
 const STAR_TIME    = 11.05; // Super-Mario-style invincibility (8.5s + 30%)
@@ -215,6 +217,14 @@ const WALL_BASE  = 85;    // squish wall speed at the start (px/s)
 const WALL_GAIN  = 0.066; // ...plus this much per metre travelled
 const WALL_MAX   = 305;
 const WALL_LEASH = 950;   // if you get further ahead than this, it speeds up
+/* Every so often the wall telegraphs, then bursts to a much faster speed for
+   a couple of seconds -- turns "ambient pressure" into an occasional real
+   "sprint now or else" moment, on top of the normal distance-based speed. */
+const SURGE_MIN      = 9;    // seconds of calm before the next surge, at least
+const SURGE_MAX       = 15;
+const SURGE_WARN      = 1.1; // telegraph duration before the burst hits
+const SURGE_BURST     = 1.8; // how long the burst itself lasts
+const SURGE_MULT      = 2.15;// wall speed multiplier during the burst
 
 /* the magical carrot and the rainbow ride it launches you into */
 const RAINBOW_TIME  = 9.5;   // seconds in the sky
@@ -333,6 +343,8 @@ const S = {
     setTimeout(() => sfx(55, 0.5, "square", 0.11, -20), 220);
     setTimeout(() => { sfx(440, 0.35, "square", 0.08, 660); sfx(220, 0.35, "sawtooth", 0.07, 220); }, 230);
   },
+  surgeWarn:  () => { [0,140,280].forEach((d,i)=>setTimeout(()=>sfx([300,340,380][i],0.13,"square",0.05,0),d)); },
+  surgeBurst: () => { sfx(160,0.28,"sawtooth",0.09,-60); setTimeout(()=>sfx(500,0.16,"square",0.06,300),40); },
   boing: () => { sfx(360, 0.1, "sine", 0.06, 260); setTimeout(() => sfx(520, 0.14, "triangle", 0.055, 140), 60); },
   carrot:() => [0, 70, 140, 210, 300, 400].forEach((d, i) =>
     setTimeout(() => sfx([523, 659, 784, 1046, 1318, 1568][i], 0.3, "triangle", 0.075), d)),
@@ -958,8 +970,9 @@ function setTile(ci, row, col, ch) {
 }
 
 /* Axis-separated AABB vs tile collision. Returns what it bumped into. */
-function moveBody(b, dt, stepUp) {
+function moveBody(b, dt, stepUp, grav) {
   stepUp = stepUp === undefined ? STEP_UP : stepUp;
+  grav = grav === undefined ? GRAVITY : grav;
   const res = { ground:false, ceil:false, wall:false };
   const wasGround = !!b.onGround;
   // --- horizontal ---
@@ -996,7 +1009,7 @@ function moveBody(b, dt, stepUp) {
     }
   }
   // --- vertical ---
-  b.vy = Math.min(b.vy + GRAVITY * dt, MAX_FALL);
+  b.vy = Math.min(b.vy + grav * dt, MAX_FALL);
   b.y += b.vy * dt;
   const edgeY = b.vy > 0 ? b.y + b.h : b.y;
   for (let x = b.x + 3; x <= b.x + b.w - 3; x += Math.min(TILE - 6, b.w - 6)) {
@@ -1043,7 +1056,8 @@ const player = { x:100, y:455, w:30, h:40, vx:0, vy:0, prevY:455, onGround:false
                  face:1, coyote:0, buffer:0, iframes:0, hearts:3, anim:0, squash:0, combo:0, airJumps:1, star:0,
                  slide:false, slopeDir:0, lastSlope:0, slopeGrace:0, slideSfx:0, runT:0, runDir:0,
                  power:null, flyFuel:FLY_TIME, flying:false, cloudMusic:0 };
-const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, camY:0, over:false, endT:0, startMs:0, rainbow:null };
+const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, camY:0, over:false, endT:0, startMs:0, rainbow:null,
+                 surgeState:"idle", surgeT:0, surgeTimer:0 };
 const trail  = [];   // breadcrumb positions so the companion squishy can follow
 
 function startRun() {
@@ -1060,6 +1074,7 @@ function startRun() {
   run.maxX = 100; run.wallX = -420; run.camX = 0; run.camY = 0; run.over = false; run.endT = 0;
   run.startMs = performance.now();   // wall-clock length of the run, for the leaderboard's speed check
   run.rainbow = null;
+  run.surgeState = "idle"; run.surgeT = 0; run.surgeTimer = 14 + Math.random() * 6;   // a little breathing room first
   run.nextMilestone = MILESTONES[0];
   world.milestone = null;
   trail.length = 0;
@@ -1448,9 +1463,12 @@ function updatePlay(dt) {
     }
 
     player.prevY = player.y;
+    const vyBeforeMove = player.vy;
     const power = equippedPower();
     player.power = power;
-    const hit = moveBody(player, dt, power === "big" ? STEP_UP * POWER_BIG_STEP : STEP_UP);
+    const nearApex = Math.abs(player.vy) < APEX_BAND && !player.onGround;
+    const hit = moveBody(player, dt, power === "big" ? STEP_UP * POWER_BIG_STEP : STEP_UP,
+                          nearApex ? GRAVITY * APEX_GRAVITY_MULT : GRAVITY);
     player.slopeDir = hit.slope || 0;
     if (hit.ceil) {
       const hy = player.y - 5;
@@ -1458,7 +1476,11 @@ function updatePlay(dt) {
         bumpBrick(player.x + player.w - 5, hy);
     }
     if (hit.ground) {
-      if (!player.onGround) { player.squash = 0.45; S.land(); }
+      if (!player.onGround) {
+        player.squash = 0.45; S.land();
+        // a proper thud only for a real fall -- routine hopping stays quiet
+        if (vyBeforeMove > 500) game.shake = Math.max(game.shake, Math.min(4, (vyBeforeMove - 500) / 250));
+      }
       player.onGround = true; player.coyote = COYOTE; player.combo = 0; player.airJumps = 1;
       if (player.power === "fly") player.flyFuel = FLY_TIME;
     } else {
@@ -1510,9 +1532,23 @@ function updatePlay(dt) {
   /* ---- keep the course built ahead of the player ---- */
   while ((player.x + 3 * CHUNK_W) > (world.built + 1) * CHUNK_W) buildChunk(world.built + 1);
 
-  /* ---- the squish wall ---- */
+  /* ---- the squish wall, with the occasional telegraphed surge ---- */
   if (!run.over) {
+    if (run.surgeState === "idle") {
+      run.surgeTimer -= dt;
+      if (run.surgeTimer <= 0) { run.surgeState = "warn"; run.surgeT = 0; S.surgeWarn(); }
+    } else if (run.surgeState === "warn") {
+      run.surgeT += dt;
+      if (run.surgeT >= SURGE_WARN) { run.surgeState = "burst"; run.surgeT = 0; S.surgeBurst(); game.shake = Math.max(game.shake, 5); }
+    } else if (run.surgeState === "burst") {
+      run.surgeT += dt;
+      if (run.surgeT >= SURGE_BURST) {
+        run.surgeState = "idle"; run.surgeT = 0;
+        run.surgeTimer = SURGE_MIN + Math.random() * (SURGE_MAX - SURGE_MIN);
+      }
+    }
     let ws = Math.min(WALL_MAX, WALL_BASE + run.dist * WALL_GAIN);
+    if (run.surgeState === "burst") ws *= SURGE_MULT;
     run.wallX += ws * dt;
     const lead = player.x - run.wallX;
     if (lead > WALL_LEASH) run.wallX += (lead - WALL_LEASH) * 1.7 * dt;  // no camping far ahead
@@ -1561,7 +1597,7 @@ function updatePlay(dt) {
         const pay = 5 * player.combo;
         player.vy = -STOMP_BOUNCE - Math.min(120, player.combo * 22);
         player.squash = -0.4; player.airJumps = 1;   // squashing a 6-7 refreshes it
-        run.stomps++; run.money += pay; game.shake = 6;
+        run.stomps++; run.money += pay; game.shake = Math.min(14, 6 + player.combo * 1.2);
         sfx(240 + player.combo * 60, 0.13, "sawtooth", 0.055, -140);
         floatText(e.x + e.w/2, e.y, player.combo > 1 ? "+" + pay + "  x" + player.combo + "!" : "+" + pay,
                   player.combo > 1 ? "#ff7fb0" : "#fff");
@@ -1805,30 +1841,73 @@ function blush(cx, cy, s, color = "rgba(255,150,180,.5)") {
 const CLOUDS = Array.from({ length: 9 }, (_, i) => ({
   x: i * 340 + Math.random() * 160, y: 40 + Math.random() * 170, s: 0.6 + Math.random() * 0.9
 }));
+
+/* ==========================================================================
+   BACKGROUND THEMES -- purely cosmetic, one is picked per calendar day (same
+   for everyone that day) so the game looks a little different if you come
+   back tomorrow. Everything else about the course is unaffected.
+   ========================================================================== */
+const THEMES = [
+  { name:"Sunny Day", sky:["#bcdcff","#ddd9fb","#f7dcec","#fbe7d6"], cloud:"rgba(255,255,255,.82)",
+    hillFar:"#c3d8f2", hillNear:"#c8e4d3", hedge:"#9fd9bb", dumpling:"#f6c9dd", sun:true, night:false, storm:false },
+  { name:"Dusk", sky:["#5f6fb3","#9a6fc2","#e08bab","#ffb877"], cloud:"rgba(255,222,214,.75)",
+    hillFar:"#7a6fb0", hillNear:"#a5709c", hedge:"#7a5a8c", dumpling:"#ffb1a0", sun:true, night:false, storm:false },
+  { name:"Night Sky", sky:["#0c1440","#1c2470","#2c2f80","#463a70"], cloud:"rgba(220,225,255,.35)",
+    hillFar:"#232a5c", hillNear:"#1c2450", hedge:"#242a52", dumpling:"#4a3f8a", sun:false, night:true, storm:false },
+  { name:"Pastel Storm", sky:["#8f9bb0","#a3aec2","#b7bfd0","#c9cfda"], cloud:"rgba(230,234,240,.85)",
+    hillFar:"#8792a8", hillNear:"#7d8a94", hedge:"#6f8078", dumpling:"#a7b0c4", sun:false, night:false, storm:true }
+];
+// days-since-epoch, not day-of-year -- stays stable across a year boundary
+const THEME = THEMES[Math.floor(Date.now() / 86400000) % THEMES.length];
+const STARS = THEME.night ? Array.from({ length: 40 }, () => ({
+  x: Math.random() * (W + 300), y: Math.random() * 260, s: Math.random() * 6.28, r: 1 + Math.random() * 1.6
+})) : [];
+const RAINDROPS = THEME.storm ? Array.from({ length: 26 }, (_, i) => ({
+  x: i * 60 + Math.random() * 40, y: Math.random() * H, len: 14 + Math.random() * 10, sp: 340 + Math.random() * 120
+})) : [];
+
 function drawSky(camX, t) {
   const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0,   "#bcdcff"); g.addColorStop(0.42, "#ddd9fb");
-  g.addColorStop(0.72,"#f7dcec"); g.addColorStop(1,    "#fbe7d6");
+  const [c0, c1, c2, c3] = THEME.sky;
+  g.addColorStop(0, c0); g.addColorStop(0.42, c1);
+  g.addColorStop(0.72, c2); g.addColorStop(1, c3);
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
 
-  // sun
-  ctx.fillStyle = "rgba(255,246,214,.85)";
-  ctx.beginPath(); ctx.arc(W - 140, 96, 52, 0, 7); ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,.5)";
-  ctx.beginPath(); ctx.arc(W - 140, 96, 74, 0, 7); ctx.fill();
+  if (THEME.sun) {
+    ctx.fillStyle = "rgba(255,246,214,.85)";
+    ctx.beginPath(); ctx.arc(W - 140, 96, 52, 0, 7); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.5)";
+    ctx.beginPath(); ctx.arc(W - 140, 96, 74, 0, 7); ctx.fill();
+  } else if (THEME.night) {
+    // a soft moon
+    ctx.fillStyle = "rgba(235,238,255,.55)";
+    ctx.beginPath(); ctx.arc(W - 140, 96, 74, 0, 7); ctx.fill();
+    ctx.fillStyle = "#f2f3ff";
+    ctx.beginPath(); ctx.arc(W - 140, 96, 46, 0, 7); ctx.fill();
+    ctx.fillStyle = "rgba(180,190,230,.5)";
+    for (const [dx, dy, dr] of [[-14, -10, 9], [10, 14, 6], [-4, 16, 5]]) {
+      ctx.beginPath(); ctx.arc(W - 140 + dx, 96 + dy, dr, 0, 7); ctx.fill();
+    }
+    for (const st of STARS) {
+      const x = mod(st.x - camX * 0.06, W + 300) - 150;
+      const tw = 0.4 + 0.6 * Math.abs(Math.sin(t * 1.6 + st.s));
+      ctx.fillStyle = "rgba(255,255,255," + tw.toFixed(2) + ")";
+      ctx.beginPath(); ctx.arc(x, st.y, st.r, 0, 7); ctx.fill();
+    }
+  }
 
   // clouds
   for (const c of CLOUDS) {
     const x = mod(c.x - camX * 0.12 + Math.sin(t * 0.1 + c.s) * 8, W + 400) - 200;
-    puff(x, c.y, 46 * c.s, "rgba(255,255,255,.82)");
+    puff(x, c.y, 46 * c.s, THEME.cloud);
   }
   // far hills
-  hills(camX * 0.18, 400, 84, "#c3d8f2", 0.0042);
-  hills(camX * 0.32, 448, 62, "#c8e4d3", 0.0061);
+  hills(camX * 0.18, 400, 84, THEME.hillFar, 0.0042);
+  hills(camX * 0.32, 448, 62, THEME.hillNear, 0.0061);
   // giant blurry dumplings drifting behind the course
   for (let i = 0; i < 10; i++) {
     const bx = mod(i * 420 - camX * 0.42, W + 900) - 450;
-    ctx.globalAlpha = 0.3; ctx.fillStyle = "#f6c9dd";
+    ctx.globalAlpha = 0.3; ctx.fillStyle = THEME.dumpling;
     ctx.beginPath(); ctx.ellipse(bx, 424, 62, 46, 0, 0, 7); ctx.fill();
     ctx.globalAlpha = 1;
   }
@@ -1836,8 +1915,22 @@ function drawSky(camX, t) {
   for (let i = 0; i < 20; i++) {
     const bx = mod(i * 210 - camX * 0.62, W + 430) - 215;
     ctx.globalAlpha = 0.85;
-    puff(bx, 524, 58, "#9fd9bb");
+    puff(bx, 524, 58, THEME.hedge);
     ctx.globalAlpha = 1;
+  }
+
+  if (THEME.storm) {
+    ctx.strokeStyle = "rgba(255,255,255,.32)"; ctx.lineWidth = 2; ctx.lineCap = "round";
+    ctx.beginPath();
+    for (const d of RAINDROPS) {
+      const x = mod(d.x - camX * 0.5, W + 80) - 40;
+      const y = mod(d.y + t * d.sp, H + 40) - 20;
+      ctx.moveTo(x, y); ctx.lineTo(x - 6, y + d.len);
+    }
+    ctx.stroke();
+    // an occasional soft lightning flash
+    const flash = Math.max(0, Math.sin(t * 0.7) - 0.97) * 30;
+    if (flash > 0) { ctx.fillStyle = "rgba(255,255,255," + Math.min(0.25, flash).toFixed(3) + ")"; ctx.fillRect(0, 0, W, H); }
   }
 }
 const mod = (v, m) => ((v % m) + m) % m;
@@ -2525,12 +2618,28 @@ function drawWall(camX, t) {
 /* the closer the wall gets, the harder the left edge of the screen throbs */
 function drawWallWarning(camX, t) {
   const gap = player.x - run.wallX;
-  if (gap > 300 || run.over) return;
-  const heat = Math.min(1, (300 - gap) / 260) * (0.55 + 0.45 * Math.sin(t * 11));
-  const g = ctx.createLinearGradient(0, 0, W * 0.55, 0);
-  g.addColorStop(0, "rgba(255,80,150," + (0.5 * heat).toFixed(3) + ")");
-  g.addColorStop(1, "rgba(255,80,150,0)");
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W * 0.55, H);
+  if (!run.over && gap <= 300) {
+    const heat = Math.min(1, (300 - gap) / 260) * (0.55 + 0.45 * Math.sin(t * 11));
+    const g = ctx.createLinearGradient(0, 0, W * 0.55, 0);
+    g.addColorStop(0, "rgba(255,80,150," + (0.5 * heat).toFixed(3) + ")");
+    g.addColorStop(1, "rgba(255,80,150,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W * 0.55, H);
+  }
+  // the surge telegraph fires regardless of how close the wall currently is --
+  // it's a "something's coming" cue, not a proximity indicator
+  if (!run.over && run.surgeState === "warn") {
+    const pulse = 0.5 + 0.5 * Math.sin(t * 22);
+    ctx.fillStyle = "rgba(255,60,40," + (0.16 + 0.14 * pulse).toFixed(3) + ")";
+    ctx.fillRect(0, 0, W, H);
+    ctx.font = "900 22px ui-rounded,system-ui,sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.globalAlpha = 0.55 + 0.45 * pulse;
+    ctx.lineWidth = 4; ctx.strokeStyle = "rgba(120,20,20,.6)";
+    ctx.strokeText("WALL SURGE!", W / 2, 46);
+    ctx.fillStyle = "#ffe0d0";
+    ctx.fillText("WALL SURGE!", W / 2, 46);
+    ctx.globalAlpha = 1;
+  }
 }
 
 function drawParticles(camX) {
@@ -3729,8 +3838,10 @@ function frame(now) {
 /* poke at the game from the browser console: __SE.save, __SE.player, etc. */
 window.__SE = { game, save, player, run, world, startRun, goHub, beginHatch, persist, MUSIC, SECTIONS,
                 rainbowY, startRainbow, endRainbow, buildChunk, resetWorld, grabStar, VERSION,
+                moveBody, APEX_BAND, APEX_GRAVITY_MULT, GRAVITY,
                 tileAtPx, isSolidPx, bumpBrick, equippedPower,
                 PALETTES, ACCESSORIES, currentPalette, squishyPalette, accessoryUnlocked,
+                THEMES, THEME,
                 SQUISHIES, EGGS, TEMPLATES, grant, input, reset(){ localStorage.removeItem(SAVE_KEY); location.reload(); } };
 
 /* first boot: the common egg from the spec, free, hatching on its own */
