@@ -119,11 +119,18 @@ ends the run, so keep moving.
 
 Every so often the squish wall does more than just creep — it telegraphs (a
 pulsing red flash and "WALL SURGE!" across the top of the screen), then, a
-little over a second later, bursts to more than double its normal speed for
-about two seconds before settling back down. It's on its own timer,
-independent of how close you actually are to it, so a surge can catch you
-even mid-obstacle. Outrunning one is the closest thing in the game to a
-dedicated "sprint now" moment.
+little over a second later, bursts forward for about two seconds before
+settling back down. It's on its own timer, independent of how close you
+actually are to it, so a surge can catch you even mid-obstacle.
+
+There are none of these at all for the first **1000m** of a run. From 1000m,
+a burst is guaranteed to close **10%** of whatever gap you'd built up to the
+wall; from 2000m, **20%**; climbing another 10% every 1000m after that, up to
+a 60% cap so a very long run doesn't become an instant kill. The camera also
+pulls back during a surge to guarantee the wall is genuinely visible on
+screen — normally it only follows you, which can leave the wall well off the
+left edge if you've got a real lead, and "there's danger somewhere behind you"
+isn't much of a threat if you can't see it.
 
 ## The background changes day to day
 
@@ -222,6 +229,22 @@ the trader, and the common egg that hatches at the very start.
 
 Everything is in `index.html`. No build step — edit, save, refresh.
 
+### The bomb squishy
+
+A round, dark little enemy that sits still until you get close (about a tile
+and a half), then arms — shaking harder and glowing hotter red the closer it
+gets to going off, with a ticking fuse that speeds up too. You've got about
+two seconds to either **stomp it** (same as any other enemy — safely defuses
+it, pays out on the combo like normal) or get clear. Left alone, it detonates:
+damages you if you're still in range, and clears out any other nearby enemies
+caught in the blast for a small bonus each.
+
+The explosion itself is randomised — a random palette from four options, and
+one of four different shapes (a confetti burst, staggered shockwave rings, a
+starburst of spikes, or a small pop followed by a bigger secondary one a
+moment later) picked fresh every single time, so no two bombs look the same
+going off. Marked `M` in a course template.
+
 ### Designing new obstacle courses
 
 Find `const TEMPLATES` (about a third of the way down). Each entry is one piece
@@ -254,6 +277,10 @@ of course: **12 rows of exactly 16 characters**.
     onto it, not just walking past) launches a huge bounce -- not a mode
     switch, just a much bigger version of a normal jump. `TRAMPOLINE_BOUNCE`
     at the top of the file sets how high.
+ M  bomb squishy -- stands still, arms when you get close, then a few
+    seconds later either you've stomped it (safe) or it detonates
+    (`BOMB_FUSE`, `BOMB_PROX`, `BOMB_BLAST` up top control the timing and
+    range).
     Ramps are 45 degrees and one tile each, so a hill is a diagonal staircase
     of them. Every ramp needs a solid tile directly underneath it, or the
     dumpling falls straight through. `STEP_UP` is how tall a lip the dumpling
@@ -433,6 +460,13 @@ a second environment: `index.html?sb=https://xxx.supabase.co&key=xxxx`.
 
 The version is shown on the main menu, under the title.
 
+- **v1.10.0** — the squish wall's surges are now distance-gated (none before
+  1000m) and escalate every 1000m after that (10%, 20%, 30%, ... up to a 60%
+  cap of the current gap, guaranteed to close), and the camera now guarantees
+  the wall is actually visible on screen during one. New enemy: the bomb
+  squishy — arms on proximity, a few seconds to stomp it safely or get clear,
+  a randomised explosion (one of four shapes, four palettes) if it goes off,
+  with a small area-clear bonus for any other enemies caught in the blast.
 - **v1.9.0** — a real hang-time at the top of a jump; landing and stomp-chain
   screen shake now scale with how hard the impact actually was, instead of
   being a flat amount every time; coyote time and jump buffer both a little

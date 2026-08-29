@@ -184,7 +184,7 @@
 "use strict";
 
 /* ------------------------------ constants ------------------------------ */
-const VERSION = "1.9.0";           // major.minor.patch -- bump minor for features
+const VERSION = "1.10.0";           // major.minor.patch -- bump minor for features
 
 const W = 960, H = 540;            // virtual resolution
 const TILE = 45;                   // tile size
@@ -220,11 +220,21 @@ const WALL_LEASH = 950;   // if you get further ahead than this, it speeds up
 /* Every so often the wall telegraphs, then bursts to a much faster speed for
    a couple of seconds -- turns "ambient pressure" into an occasional real
    "sprint now or else" moment, on top of the normal distance-based speed. */
-const SURGE_MIN      = 9;    // seconds of calm before the next surge, at least
-const SURGE_MAX       = 15;
-const SURGE_WARN      = 1.1; // telegraph duration before the burst hits
-const SURGE_BURST     = 1.8; // how long the burst itself lasts
-const SURGE_MULT      = 2.15;// wall speed multiplier during the burst
+const SURGE_MIN       = 9;    // seconds of calm before the next surge, at least
+const SURGE_MAX        = 15;
+const SURGE_WARN       = 1.1; // telegraph duration before the burst hits
+const SURGE_BURST      = 1.8; // how long the burst itself lasts
+const SURGE_START_DIST = 1000;  // no surges at all before this distance
+const SURGE_STEP_DIST  = 1000;  // severity climbs another notch every this many metres
+const SURGE_STEP_PCT   = 0.10;  // ...by this much each time (10%, 20%, 30%, ...)
+const SURGE_MAX_PCT    = 0.60;  // ...capped here, or a late surge could be an instant kill
+// how much of the player-wall gap a burst is guaranteed to close, given how
+// far into the run you are: 0 before 1000m, 10% from 1000m, 20% from 2000m,
+// 30% from 3000m, and so on up to the cap
+function surgeSeverity() {
+  if (run.dist < SURGE_START_DIST) return 0;
+  return Math.min(SURGE_MAX_PCT, SURGE_STEP_PCT * Math.floor(run.dist / SURGE_STEP_DIST));
+}
 
 /* the magical carrot and the rainbow ride it launches you into */
 const RAINBOW_TIME  = 9.5;   // seconds in the sky
@@ -254,6 +264,19 @@ const SLIDE_MAX   = 540;
 const STEP_UP     = 24;
 /* brick blocks you can smash open from underneath */
 const BRICK_HITS  = 3;
+
+/* a bomb squishy: arms when you get close, gives you a few seconds to stomp
+   it (safe defuse) or get clear before it goes off for real */
+const BOMB_PROX  = 75;   // proximity that arms the fuse
+const BOMB_FUSE  = 2.2;  // seconds from arming to detonation
+const BOMB_BLAST = 95;   // damage radius if it actually goes off
+const BOMB_CHAIN = 120;  // nearby enemies caught in the blast go down too
+const BOMB_PALETTES = [
+  ["#ff6b6b", "#ffa94d", "#ffd93d"],   // fire
+  ["#6bd4ff", "#8f7aff", "#ff7ad4"],   // cosmic
+  ["#7bff9e", "#ffe873", "#ff9ec8"],   // party
+  ["#ff5ca8", "#ffd400", "#4dd0ff"]    // neon
+];
 /* the trampoline -- a much bigger version of a normal jump, not a separate
    mode. You launch up near the clouds and land wherever gravity takes you,
    still inside the ordinary run the whole time. */
@@ -335,6 +358,13 @@ const S = {
   star:  () => [0, 60, 120, 180].forEach((d, i) =>
     setTimeout(() => sfx([784, 988, 1175, 1568][i], 0.22, "square", 0.07), d)),
   heart: () => [0, 110].forEach((d, i) => setTimeout(() => sfx([659, 880][i], 0.3, "triangle", 0.07), d)),
+  bombArm: () => sfx(220, 0.1, "square", 0.045, 0),
+  bombTick: (armFrac) => sfx(500 + armFrac * 300, 0.05, "square", Math.min(0.09, 0.04 + armFrac * 0.05), 0),
+  boom: () => {
+    sfx(70, 0.5, "sawtooth", 0.13, -40);
+    setTimeout(() => sfx(180, 0.3, "square", 0.08, -260), 30);
+    setTimeout(() => sfx(900, 0.2, "triangle", 0.05, 500), 90);
+  },
   godMode: () => {
     // an original chunky little riser + thump, in the spirit of a classic
     // FPS power-up jingle -- not a sample of anything, just the same vibe
@@ -821,7 +851,19 @@ const TEMPLATES = [
 { tier:1, rows:[  // brick shelf, no trampoline this time
 "................","................","................","................",
 "................","................",".......ooo......","......XXX.......",
-"................","................","................","################"]}
+"................","................","................","################"]},
+{ tier:1, rows:[  // meet the bomb -- give it room, or squash it fast
+"................","................","................","................",
+"................","................","................","......ooo.......",
+"................","................","......M.........","################"]},
+{ tier:2, rows:[  // a bomb guarding a little stash
+"................","................","................","...ooo.....ooo..",
+"................","................","................","................",
+"................","................","......M.........","################"]},
+{ tier:3, rows:[  // a bomb with company -- catch them both in the blast?
+"................","................","................","................",
+"................","................","................",".....o.....o....",
+"................","................","..6....M....7...","################"]}
 ];
 
 /* ------------------------------ world state ----------------------------- */
@@ -895,6 +937,7 @@ function buildChunk(index) {
         case "R": world.rings.push({ x:wx + TILE/2, y:wy + TILE/2, base:wy + TILE/2, a:Math.random()*6.28 }); break;
         case "6": world.enemies.push(makeEnemy(wx + TILE/2, wy + TILE, "6")); break;
         case "7": world.enemies.push(makeEnemy(wx + TILE/2, wy + TILE, "7")); break;
+        case "M": world.enemies.push(makeBomb(wx + TILE/2, wy + TILE)); break;
       }
       line += "#C=><X".indexOf(ch) >= 0 ? ch : ".";
     }
@@ -926,6 +969,14 @@ function makeEnemy(cx, footY, kind) {
     x: cx - 17, y: footY - 36, w: 34, h: 36,
     vx: (Math.random() < 0.5 ? -1 : 1) * (kind === "6" ? 62 : 40), vy: 0,
     kind, onGround: false, hopT: 0.4 + Math.random(), dead: 0, t: Math.random() * 6, growling: false
+  };
+}
+
+function makeBomb(cx, footY) {
+  return {
+    x: cx - 17, y: footY - 36, w: 34, h: 36, vx: 0, vy: 0,
+    kind: "M", onGround: false, dead: 0, t: Math.random() * 6, growling: false,
+    armed: false, fuse: 0, tickT: 0
   };
 }
 
@@ -1057,7 +1108,7 @@ const player = { x:100, y:455, w:30, h:40, vx:0, vy:0, prevY:455, onGround:false
                  slide:false, slopeDir:0, lastSlope:0, slopeGrace:0, slideSfx:0, runT:0, runDir:0,
                  power:null, flyFuel:FLY_TIME, flying:false, cloudMusic:0 };
 const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, camY:0, over:false, endT:0, startMs:0, rainbow:null,
-                 surgeState:"idle", surgeT:0, surgeTimer:0 };
+                 surgeState:"idle", surgeT:0, surgeTimer:0, surgeBurstSpeed:0 };
 const trail  = [];   // breadcrumb positions so the companion squishy can follow
 
 function startRun() {
@@ -1205,6 +1256,70 @@ function puffRing(x, y) {
 
 function floatText(x, y, txt, color) {
   world.texts.push({ x, y, txt, color, life: 0, max: 0.95 });
+}
+
+/* the bomb's payoff -- a big randomised explosion, genuinely different every
+   time: a random palette, and one of four distinct shapes/timings, not just
+   a recolour of the same particle spray */
+function spawnExplosion(cx, cy) {
+  const style = (Math.random() * 4) | 0;
+  const pal = BOMB_PALETTES[(Math.random() * BOMB_PALETTES.length) | 0];
+  const pick = () => pal[(Math.random() * pal.length) | 0];
+  const ray = (n, spdLo, spdHi, lifeLo, lifeHi, sizeLo, sizeHi, shape) => {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, s = spdLo + Math.random() * (spdHi - spdLo);
+      world.parts.push({ x: cx, y: cy, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+        life: 0, max: lifeLo + Math.random() * (lifeHi - lifeLo),
+        color: pick(), size: sizeLo + Math.random() * (sizeHi - sizeLo), shape });
+    }
+  };
+  const ring = (delay, size, color) => {
+    setTimeout(() => world.parts.push({ x: cx, y: cy, vx: 0, vy: 0, life: 0, max: 0.55, color, size, shape: "ring" }), delay);
+  };
+
+  ring(0, 130, "#ffffff");            // a flash-ring common to every style, for punch
+
+  if (style === 0) {                  // confetti burst
+    ray(40, 140, 400, 0.5, 1.0, 3, 7);
+  } else if (style === 1) {           // staggered shockwave rings
+    ring(0, 70, pick()); ring(90, 100, pick()); ring(180, 135, pick());
+    ray(18, 70, 160, 0.35, 0.55, 2, 4);
+  } else if (style === 2) {           // starburst spikes
+    const n = 14;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.random() * 0.15, s = 320 + Math.random() * 140;
+      world.parts.push({ x: cx, y: cy, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+        life: 0, max: 0.4 + Math.random() * 0.2, color: pick(), size: 3 + Math.random() * 2, shape: "spike" });
+    }
+    ray(20, 60, 150, 0.35, 0.5, 2, 4);
+  } else {                            // firework -- a small pop, then a bigger second one
+    ray(16, 90, 160, 0.25, 0.35, 3, 6);
+    setTimeout(() => ray(34, 180, 400, 0.5, 0.85, 2.5, 5.5), 220);
+  }
+}
+
+function detonateBomb(e) {
+  const cx = e.x + e.w/2, cy = e.y + e.h/2;
+  game.shake = 16;
+  S.boom();
+  spawnExplosion(cx, cy);
+  floatText(cx, cy - 20, "BOOM!", "#ffb347");
+
+  if (player.star <= 0) {
+    const dx = (player.x + player.w/2) - cx, dy = (player.y + player.h/2) - cy;
+    if (dx*dx + dy*dy < BOMB_BLAST*BOMB_BLAST) hurt();
+  }
+  // nearby enemies caught in the blast go down too -- a little tactical AOE
+  for (const other of world.enemies) {
+    if (other === e || other.dead) continue;
+    const ex = (other.x + other.w/2) - cx, ey = (other.y + other.h/2) - cy;
+    if (ex*ex + ey*ey < BOMB_CHAIN*BOMB_CHAIN) {
+      other.dead = 0.001; other.vx = 0;
+      run.money += 5; run.stomps++;
+      floatText(other.x + other.w/2, other.y, "+5", "#ffe97a");
+      burst(other.x + other.w/2, other.y + other.h/2, "#ffc7de", 10);
+    }
+  }
 }
 
 function burst(x, y, color, n, spd = 220) {
@@ -1535,11 +1650,21 @@ function updatePlay(dt) {
   /* ---- the squish wall, with the occasional telegraphed surge ---- */
   if (!run.over) {
     if (run.surgeState === "idle") {
-      run.surgeTimer -= dt;
-      if (run.surgeTimer <= 0) { run.surgeState = "warn"; run.surgeT = 0; S.surgeWarn(); }
+      if (run.dist >= SURGE_START_DIST) {
+        run.surgeTimer -= dt;
+        if (run.surgeTimer <= 0) { run.surgeState = "warn"; run.surgeT = 0; S.surgeWarn(); }
+      }
     } else if (run.surgeState === "warn") {
       run.surgeT += dt;
-      if (run.surgeT >= SURGE_WARN) { run.surgeState = "burst"; run.surgeT = 0; S.surgeBurst(); game.shake = Math.max(game.shake, 5); }
+      if (run.surgeT >= SURGE_WARN) {
+        run.surgeState = "burst"; run.surgeT = 0; S.surgeBurst(); game.shake = Math.max(game.shake, 5);
+        // guarantee this burst closes a real, escalating slice of the gap --
+        // not just a speed multiplier that might barely matter from far ahead
+        const gap = Math.max(0, player.x - run.wallX);
+        const closeAmount = gap * surgeSeverity();
+        const baseWs = Math.min(WALL_MAX, WALL_BASE + run.dist * WALL_GAIN);
+        run.surgeBurstSpeed = baseWs + closeAmount / SURGE_BURST;
+      }
     } else if (run.surgeState === "burst") {
       run.surgeT += dt;
       if (run.surgeT >= SURGE_BURST) {
@@ -1547,8 +1672,8 @@ function updatePlay(dt) {
         run.surgeTimer = SURGE_MIN + Math.random() * (SURGE_MAX - SURGE_MIN);
       }
     }
-    let ws = Math.min(WALL_MAX, WALL_BASE + run.dist * WALL_GAIN);
-    if (run.surgeState === "burst") ws *= SURGE_MULT;
+    const ws = run.surgeState === "burst" ? run.surgeBurstSpeed
+             : Math.min(WALL_MAX, WALL_BASE + run.dist * WALL_GAIN);
     run.wallX += ws * dt;
     const lead = player.x - run.wallX;
     if (lead > WALL_LEASH) run.wallX += (lead - WALL_LEASH) * 1.7 * dt;  // no camping far ahead
@@ -1560,6 +1685,38 @@ function updatePlay(dt) {
     if (e.dead) { e.dead += dt; continue; }
     if (e.x < run.wallX - 500 || e.x > player.x + W) continue;
     e.t += dt;
+
+    if (e.kind === "M") {
+      // stationary -- no patrol, no ledge/wall turning, just the fuse
+      if (!e.armed && !run.over) {
+        const dx = (player.x + player.w/2) - (e.x + e.w/2), dy = (player.y + player.h/2) - (e.y + e.h/2);
+        if (dx*dx + dy*dy < BOMB_PROX*BOMB_PROX) { e.armed = true; e.fuse = BOMB_FUSE; e.tickT = 0; S.bombArm(); }
+      }
+      if (e.armed) {
+        e.fuse -= dt;
+        e.tickT -= dt;
+        const armFrac = 1 - Math.max(0, e.fuse / BOMB_FUSE);
+        if (e.tickT <= 0) { S.bombTick(armFrac); e.tickT = 0.42 - armFrac * 0.28; }
+        if (e.fuse <= 0) { detonateBomb(e); e.dead = 0.001; }
+      }
+      if (run.over) continue;
+      if (overlap(player, e)) {
+        const fell = player.vy > 60 && (player.prevY + player.h) <= e.y + 14;
+        if (fell) {
+          e.dead = 0.001; e.vx = 0;
+          player.combo++;
+          const pay = 5 * player.combo;
+          player.vy = -STOMP_BOUNCE - Math.min(120, player.combo * 22);
+          player.squash = -0.4; player.airJumps = 1;
+          run.stomps++; run.money += pay; game.shake = Math.min(14, 6 + player.combo * 1.2);
+          sfx(240 + player.combo * 60, 0.13, "sawtooth", 0.055, -140);
+          floatText(e.x + e.w/2, e.y, "defused! +" + pay, "#a9edc4");
+          burst(e.x + e.w/2, e.y + e.h/2, "#bfe9d0", 10 + player.combo * 3);
+        } else if (player.star <= 0) hurt();
+      }
+      continue;
+    }
+
     if (e.kind === "7") {
       e.hopT -= dt;
       if (e.onGround && e.hopT <= 0) { e.vy = -600; e.hopT = 1.1 + Math.random() * 0.6; e.onGround = false; }
@@ -1761,7 +1918,13 @@ function updatePlay(dt) {
   }
 
   /* ---- camera + companion trail ---- */
-  const target = Math.max(player.x - 340, run.wallX - 40);
+  let target = Math.max(player.x - 340, run.wallX - 40);
+  // during a surge, guarantee the wall is actually visible -- normally the
+  // camera just follows the player, which can leave the wall off the left
+  // edge entirely whenever the lead is more than a couple hundred px
+  if (run.surgeState === "warn" || run.surgeState === "burst") {
+    target = Math.min(target, run.wallX - 150);
+  }
   run.camX += (target - run.camX) * Math.min(1, dt * 6);
   run.camX = Math.max(run.camX, run.wallX - 60);
   const targetCamY = Math.max(0, CAM_Y_LINE - player.y);
@@ -2264,8 +2427,53 @@ function drawRing(rg, camX) {
 }
 
 /* -------------------------------- enemies -------------------------------- */
+function drawBomb(e, x, y, t) {
+  if (e.dead) {
+    ctx.save(); ctx.translate(x, y);
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.6; ctx.lineCap = "round";
+    for (const sx of [-7, 7]) {
+      ctx.beginPath(); ctx.moveTo(sx - 4, -3); ctx.lineTo(sx + 4, 3);
+      ctx.moveTo(sx + 4, -3); ctx.lineTo(sx - 4, 3); ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
+  const armFrac = e.armed ? 1 - Math.max(0, e.fuse / BOMB_FUSE) : 0;
+  const shakeAmt = e.armed ? armFrac * armFrac * 6 : 0;
+  const jitterX = shakeAmt ? (Math.random() - 0.5) * shakeAmt : 0;
+  const pulse = e.armed ? 1 + Math.sin(t * (6 + armFrac * 18)) * 0.05 * (0.4 + armFrac)
+                         : 1 + Math.sin(e.t * 1.6) * 0.02;
+
+  ctx.fillStyle = "rgba(60,45,75,.16)";
+  ctx.beginPath(); ctx.ellipse(x, y + 17, 15, 4, 0, 0, 7); ctx.fill();
+
+  ctx.save(); ctx.translate(x + jitterX, y); ctx.scale(pulse, pulse);
+
+  // fuse + spark -- flickers faster and glows hotter the closer it is to going off
+  const fuseWig = Math.sin(t * (e.armed ? 26 : 5) + e.t) * 3;
+  ctx.strokeStyle = "#7a5a3a"; ctx.lineWidth = 3; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(0, -16); ctx.quadraticCurveTo(6 + fuseWig, -24, 3, -30); ctx.stroke();
+  const sparkGlow = e.armed ? 0.6 + 0.4 * Math.sin(t * 30) : 0.5 + 0.3 * Math.sin(t * 4);
+  ctx.fillStyle = e.armed ? "rgba(255,120,40," + sparkGlow.toFixed(2) + ")" : "rgba(255,200,80," + sparkGlow.toFixed(2) + ")";
+  ctx.beginPath(); ctx.arc(3, -30, e.armed ? 4.5 : 3, 0, 7); ctx.fill();
+
+  // round body, warming from charcoal toward red as the fuse burns down
+  const g = Math.round(38 - armFrac * 20), b2 = Math.round(48 - armFrac * 30);
+  ctx.fillStyle = armFrac > 0 ? "rgb(" + Math.round(40 + armFrac * 180) + "," + g + "," + b2 + ")" : "#3c3648";
+  ctx.beginPath(); ctx.arc(0, 0, 17, 0, 7); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,.12)";
+  ctx.beginPath(); ctx.ellipse(-6, -6, 6, 4, -0.4, 0, 7); ctx.fill();
+  ctx.strokeStyle = "rgba(0,0,0,.35)"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, 17, 0, 7); ctx.stroke();
+
+  eyes(0, -1, 26, 0, Math.sin(t * 2 + e.t) > 0.95);
+  blush(0, -1, 15, "rgba(255,120,120,.35)");
+  ctx.restore();
+}
+
 function drawEnemy(e, camX, t) {
   const x = e.x + e.w/2 - camX, y = e.y + e.h/2;
+  if (e.kind === "M") { drawBomb(e, x, y, t); return; }
   const squash = e.dead ? Math.min(1, e.dead * 7) : 0;
   const w = e.w/2 * (1 + squash * 0.55), h = e.h/2 * (1 - squash * 0.78);
   const wob = e.dead ? 0 : Math.sin(e.t * 7) * 0.06;
@@ -2646,8 +2854,26 @@ function drawParticles(camX) {
   for (const p of world.parts) {
     const a = 1 - p.life / p.max;
     ctx.globalAlpha = Math.max(0, a);
-    ctx.fillStyle = p.color;
-    ctx.beginPath(); ctx.arc(p.x - camX, p.y, p.size * a + 0.8, 0, 7); ctx.fill();
+    if (p.shape === "ring") {
+      // a stationary particle whose DRAWN radius grows over its life --
+      // a cheap, effective expanding shockwave with no new physics needed
+      const grow = Math.max(0, Math.min(1, p.life / p.max));
+      ctx.strokeStyle = p.color; ctx.lineWidth = Math.max(1, 5 * (1 - grow));
+      ctx.beginPath(); ctx.arc(p.x - camX, p.y, p.size * grow, 0, 7); ctx.stroke();
+    } else if (p.shape === "spike") {
+      // a fast streak rendered as a short trailing line, not a dot
+      const spd = Math.hypot(p.vx, p.vy);
+      const len = Math.min(26, spd * 0.045);
+      const ang = Math.atan2(p.vy, p.vx);
+      ctx.strokeStyle = p.color; ctx.lineWidth = Math.max(1, p.size * a); ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(p.x - camX, p.y);
+      ctx.lineTo(p.x - camX - Math.cos(ang) * len, p.y - Math.sin(ang) * len);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x - camX, p.y, p.size * a + 0.8, 0, 7); ctx.fill();
+    }
   }
   ctx.globalAlpha = 1;
 }
@@ -3841,7 +4067,7 @@ window.__SE = { game, save, player, run, world, startRun, goHub, beginHatch, per
                 moveBody, APEX_BAND, APEX_GRAVITY_MULT, GRAVITY,
                 tileAtPx, isSolidPx, bumpBrick, equippedPower,
                 PALETTES, ACCESSORIES, currentPalette, squishyPalette, accessoryUnlocked,
-                THEMES, THEME,
+                THEMES, THEME, detonateBomb, spawnExplosion, surgeSeverity, makeBomb,
                 SQUISHIES, EGGS, TEMPLATES, grant, input, reset(){ localStorage.removeItem(SAVE_KEY); location.reload(); } };
 
 /* first boot: the common egg from the spec, free, hatching on its own */
