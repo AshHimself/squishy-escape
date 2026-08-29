@@ -126,9 +126,9 @@ little over a second later, bursts forward for about two seconds before
 settling back down. It's on its own timer, independent of how close you
 actually are to it, so a surge can catch you even mid-obstacle.
 
-There are none of these at all for the first **1000m** of a run. From 1000m,
-a burst is guaranteed to close **10%** of whatever gap you'd built up to the
-wall; from 2000m, **20%**; climbing another 10% every 1000m after that, up to
+There are none of these at all for the first **500m** of a run. From 500m, a
+burst is guaranteed to close **10%** of whatever gap you'd built up to the
+wall; from 1500m, **20%**; climbing another 10% every 1000m after that, up to
 a 60% cap so a very long run doesn't become an instant kill. The camera also
 pulls back during a surge to guarantee the wall is genuinely visible on
 screen — normally it only follows you, which can leave the wall well off the
@@ -478,6 +478,9 @@ own `gh-pages` branch, decoupled from `main`) for anyone with the old link.
 
 The version is shown on the main menu, under the title.
 
+- **v1.10.1** — surges now start at 500m instead of 1000m (severity re-anchors
+  to the new start too, so it's a real 10% right away rather than "surges
+  happen but do nothing" until 1000m).
 - **v1.10.0** — the squish wall's surges are now distance-gated (none before
   1000m) and escalate every 1000m after that (10%, 20%, 30%, ... up to a 60%
   cap of the current gap, guaranteed to close), and the camera now guarantees

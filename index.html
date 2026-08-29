@@ -184,7 +184,7 @@
 "use strict";
 
 /* ------------------------------ constants ------------------------------ */
-const VERSION = "1.10.0";           // major.minor.patch -- bump minor for features
+const VERSION = "1.10.1";           // major.minor.patch -- bump minor for features
 
 const W = 960, H = 540;            // virtual resolution
 const TILE = 45;                   // tile size
@@ -224,16 +224,19 @@ const SURGE_MIN       = 9;    // seconds of calm before the next surge, at least
 const SURGE_MAX        = 15;
 const SURGE_WARN       = 1.1; // telegraph duration before the burst hits
 const SURGE_BURST      = 1.8; // how long the burst itself lasts
-const SURGE_START_DIST = 1000;  // no surges at all before this distance
-const SURGE_STEP_DIST  = 1000;  // severity climbs another notch every this many metres
+const SURGE_START_DIST = 500;   // no surges at all before this distance
+const SURGE_STEP_DIST  = 1000;  // severity climbs another notch every this many metres after that
 const SURGE_STEP_PCT   = 0.10;  // ...by this much each time (10%, 20%, 30%, ...)
 const SURGE_MAX_PCT    = 0.60;  // ...capped here, or a late surge could be an instant kill
 // how much of the player-wall gap a burst is guaranteed to close, given how
-// far into the run you are: 0 before 1000m, 10% from 1000m, 20% from 2000m,
-// 30% from 3000m, and so on up to the cap
+// far into the run you are: 0 before 500m, 10% right at 500m, 20% from
+// 1500m, 30% from 2500m, and so on up to the cap -- severity starts biting
+// immediately once surges begin, rather than "surges happen but do nothing"
+// for the first 1000m
 function surgeSeverity() {
   if (run.dist < SURGE_START_DIST) return 0;
-  return Math.min(SURGE_MAX_PCT, SURGE_STEP_PCT * Math.floor(run.dist / SURGE_STEP_DIST));
+  const step = Math.floor((run.dist - SURGE_START_DIST) / SURGE_STEP_DIST) + 1;
+  return Math.min(SURGE_MAX_PCT, SURGE_STEP_PCT * step);
 }
 
 /* the magical carrot and the rainbow ride it launches you into */
