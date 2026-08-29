@@ -184,7 +184,7 @@
 "use strict";
 
 /* ------------------------------ constants ------------------------------ */
-const VERSION = "1.10.1";           // major.minor.patch -- bump minor for features
+const VERSION = "1.11.0";           // major.minor.patch -- bump minor for features
 
 const W = 960, H = 540;            // virtual resolution
 const TILE = 45;                   // tile size
@@ -228,6 +228,11 @@ const SURGE_START_DIST = 500;   // no surges at all before this distance
 const SURGE_STEP_DIST  = 1000;  // severity climbs another notch every this many metres after that
 const SURGE_STEP_PCT   = 0.10;  // ...by this much each time (10%, 20%, 30%, ...)
 const SURGE_MAX_PCT    = 0.60;  // ...capped here, or a late surge could be an instant kill
+// the camera never pans for a surge -- it's the WALL that has to actually
+// enter view. A burst always closes at least enough gap to land the wall
+// comfortably on screen (~80px in from the left edge), on top of whatever
+// the severity-based percentage adds once that's the bigger number
+const SURGE_VISIBLE_GAP = 260;
 // how much of the player-wall gap a burst is guaranteed to close, given how
 // far into the run you are: 0 before 500m, 10% right at 500m, 20% from
 // 1500m, 30% from 2500m, and so on up to the cap -- severity starts biting
@@ -271,7 +276,11 @@ const BRICK_HITS  = 3;
 /* a bomb squishy: arms when you get close, gives you a few seconds to stomp
    it (safe defuse) or get clear before it goes off for real */
 const BOMB_PROX  = 75;   // proximity that arms the fuse
-const BOMB_FUSE  = 2.2;  // seconds from arming to detonation
+const BOMB_FUSE  = 2.0;  // seconds from arming to detonation -- it chases you the whole time
+const BOMB_HOP_VY  = -520;   // hop height once armed
+const BOMB_HOP_VX  = 200;    // lunge speed toward you, per hop
+const BOMB_HOP_MIN = 0.28;   // frantic, closely-spaced hops given the short fuse
+const BOMB_HOP_MAX = 0.4;
 const BOMB_BLAST = 95;   // damage radius if it actually goes off
 const BOMB_CHAIN = 120;  // nearby enemies caught in the blast go down too
 const BOMB_PALETTES = [
@@ -1111,7 +1120,7 @@ const player = { x:100, y:455, w:30, h:40, vx:0, vy:0, prevY:455, onGround:false
                  slide:false, slopeDir:0, lastSlope:0, slopeGrace:0, slideSfx:0, runT:0, runDir:0,
                  power:null, flyFuel:FLY_TIME, flying:false, cloudMusic:0 };
 const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, camY:0, over:false, endT:0, startMs:0, rainbow:null,
-                 surgeState:"idle", surgeT:0, surgeTimer:0, surgeBurstSpeed:0 };
+                 surgeState:"idle", surgeT:0, surgeTimer:0, surgeTargetGap:0 };
 const trail  = [];   // breadcrumb positions so the companion squishy can follow
 
 function startRun() {
@@ -1301,12 +1310,35 @@ function spawnExplosion(cx, cy) {
   }
 }
 
+// the first solid tile straight down from a point, or null over a pit --
+// used to sit the crater decal on the actual ground, even if the bomb went
+// off mid-hop rather than standing still
+function groundYBelow(px, startY) {
+  const startRow = Math.max(0, Math.floor(startY / TILE));
+  // only look a few tiles down -- if a bomb went off mid-fall (should be rare
+  // now that hops avoid ledges, but cheap insurance costs nothing), there's
+  // no nearby ground to scorch and it should just skip the decal, not go
+  // hunting for the literal bottom of a well
+  for (let row = startRow; row < Math.min(ROWS, startRow + 4); row++) {
+    if (isSolidPx(px, row * TILE + 2)) return row * TILE;
+  }
+  return null;
+}
+
 function detonateBomb(e) {
   const cx = e.x + e.w/2, cy = e.y + e.h/2;
   game.shake = 16;
   S.boom();
   spawnExplosion(cx, cy);
   floatText(cx, cy - 20, "BOOM!", "#ffb347");
+
+  // a scorched little crater, purely cosmetic -- sits on whatever ground is
+  // actually below the blast, fades out over a few seconds
+  const gy = groundYBelow(cx, cy);
+  if (gy !== null) {
+    world.parts.push({ x: cx, y: gy, vx: 0, vy: 0, life: 0, max: 5,
+      color: "#000", size: 32 + Math.random() * 10, shape: "crater" });
+  }
 
   if (player.star <= 0) {
     const dx = (player.x + player.w/2) - cx, dy = (player.y + player.h/2) - cy;
@@ -1661,12 +1693,12 @@ function updatePlay(dt) {
       run.surgeT += dt;
       if (run.surgeT >= SURGE_WARN) {
         run.surgeState = "burst"; run.surgeT = 0; S.surgeBurst(); game.shake = Math.max(game.shake, 5);
-        // guarantee this burst closes a real, escalating slice of the gap --
-        // not just a speed multiplier that might barely matter from far ahead
-        const gap = Math.max(0, player.x - run.wallX);
-        const closeAmount = gap * surgeSeverity();
-        const baseWs = Math.min(WALL_MAX, WALL_BASE + run.dist * WALL_GAIN);
-        run.surgeBurstSpeed = baseWs + closeAmount / SURGE_BURST;
+        // the TARGET gap this burst must hit by the time it ends -- whichever
+        // is smaller (more aggressive) of the severity-based percentage and
+        // the guaranteed-visible minimum
+        const startGap = Math.max(0, player.x - run.wallX);
+        const pctTargetGap = startGap * (1 - surgeSeverity());
+        run.surgeTargetGap = Math.min(pctTargetGap, SURGE_VISIBLE_GAP);
       }
     } else if (run.surgeState === "burst") {
       run.surgeT += dt;
@@ -1675,8 +1707,17 @@ function updatePlay(dt) {
         run.surgeTimer = SURGE_MIN + Math.random() * (SURGE_MAX - SURGE_MIN);
       }
     }
-    const ws = run.surgeState === "burst" ? run.surgeBurstSpeed
-             : Math.min(WALL_MAX, WALL_BASE + run.dist * WALL_GAIN);
+    const baseWs = Math.min(WALL_MAX, WALL_BASE + run.dist * WALL_GAIN);
+    let ws = baseWs;
+    if (run.surgeState === "burst") {
+      // recomputed every frame, not just once at burst-start -- if the
+      // player speeds up mid-burst, the required closure re-targets itself
+      // instead of being outrun by a fixed speed set at the start
+      const gap = Math.max(0, player.x - run.wallX);
+      const remainT = Math.max(0.05, SURGE_BURST - run.surgeT);
+      const needed = Math.max(0, gap - run.surgeTargetGap);
+      ws = baseWs + needed / remainT;
+    }
     run.wallX += ws * dt;
     const lead = player.x - run.wallX;
     if (lead > WALL_LEASH) run.wallX += (lead - WALL_LEASH) * 1.7 * dt;  // no camping far ahead
@@ -1690,17 +1731,35 @@ function updatePlay(dt) {
     e.t += dt;
 
     if (e.kind === "M") {
-      // stationary -- no patrol, no ledge/wall turning, just the fuse
+      // stationary until it arms -- then it hops after you for the whole fuse
       if (!e.armed && !run.over) {
         const dx = (player.x + player.w/2) - (e.x + e.w/2), dy = (player.y + player.h/2) - (e.y + e.h/2);
-        if (dx*dx + dy*dy < BOMB_PROX*BOMB_PROX) { e.armed = true; e.fuse = BOMB_FUSE; e.tickT = 0; S.bombArm(); }
+        if (dx*dx + dy*dy < BOMB_PROX*BOMB_PROX) {
+          e.armed = true; e.fuse = BOMB_FUSE; e.tickT = 0; e.hopT = 0.12; S.bombArm();
+        }
       }
-      if (e.armed) {
+      if (e.armed && !e.dead) {
         e.fuse -= dt;
         e.tickT -= dt;
         const armFrac = 1 - Math.max(0, e.fuse / BOMB_FUSE);
         if (e.tickT <= 0) { S.bombTick(armFrac); e.tickT = 0.42 - armFrac * 0.28; }
         if (e.fuse <= 0) { detonateBomb(e); e.dead = 0.001; }
+        else {
+          e.hopT -= dt;
+          if (e.onGround && e.hopT <= 0) {
+            const dir = Math.sign((player.x + player.w/2) - (e.x + e.w/2)) || 1;
+            // don't lunge over a ledge into a pit -- if there's no ground a
+            // hop's-width ahead in that direction, hop straight up instead
+            const aheadX = e.x + e.w/2 + dir * 55;
+            const safe = isSolidPx(aheadX, e.y + e.h + 8);
+            e.vy = BOMB_HOP_VY; e.vx = safe ? dir * BOMB_HOP_VX : 0;
+            e.hopT = BOMB_HOP_MIN + Math.random() * (BOMB_HOP_MAX - BOMB_HOP_MIN);
+          }
+          const r = moveBody(e, dt);
+          e.onGround = r.ground;
+          if (r.wall) e.vx = 0;
+          if (r.ground) e.vx *= 0.5;   // settle between hops instead of sliding
+        }
       }
       if (run.over) continue;
       if (overlap(player, e)) {
@@ -1921,13 +1980,7 @@ function updatePlay(dt) {
   }
 
   /* ---- camera + companion trail ---- */
-  let target = Math.max(player.x - 340, run.wallX - 40);
-  // during a surge, guarantee the wall is actually visible -- normally the
-  // camera just follows the player, which can leave the wall off the left
-  // edge entirely whenever the lead is more than a couple hundred px
-  if (run.surgeState === "warn" || run.surgeState === "burst") {
-    target = Math.min(target, run.wallX - 150);
-  }
+  const target = Math.max(player.x - 340, run.wallX - 40);
   run.camX += (target - run.camX) * Math.min(1, dt * 6);
   run.camX = Math.max(run.camX, run.wallX - 60);
   const targetCamY = Math.max(0, CAM_Y_LINE - player.y);
@@ -2863,6 +2916,15 @@ function drawParticles(camX) {
       const grow = Math.max(0, Math.min(1, p.life / p.max));
       ctx.strokeStyle = p.color; ctx.lineWidth = Math.max(1, 5 * (1 - grow));
       ctx.beginPath(); ctx.arc(p.x - camX, p.y, p.size * grow, 0, 7); ctx.stroke();
+    } else if (p.shape === "crater") {
+      // a scorched dip drawn ON TOP of the ground -- purely a decal, no tile
+      // is ever touched, so it can't widen a gap or open a hole to fall through
+      ctx.fillStyle = "rgba(35,24,18,.55)";
+      ctx.beginPath(); ctx.ellipse(p.x - camX, p.y, p.size, p.size * 0.32, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "rgba(90,58,36,.4)";
+      ctx.beginPath(); ctx.ellipse(p.x - camX, p.y - 2, p.size * 0.68, p.size * 0.2, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = "rgba(255,214,150,.28)"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(p.x - camX, p.y, p.size, p.size * 0.32, 0, 0, 7); ctx.stroke();
     } else if (p.shape === "spike") {
       // a fast streak rendered as a short trailing line, not a dot
       const spd = Math.hypot(p.vx, p.vy);
@@ -4070,7 +4132,7 @@ window.__SE = { game, save, player, run, world, startRun, goHub, beginHatch, per
                 moveBody, APEX_BAND, APEX_GRAVITY_MULT, GRAVITY,
                 tileAtPx, isSolidPx, bumpBrick, equippedPower,
                 PALETTES, ACCESSORIES, currentPalette, squishyPalette, accessoryUnlocked,
-                THEMES, THEME, detonateBomb, spawnExplosion, surgeSeverity, makeBomb,
+                THEMES, THEME, detonateBomb, spawnExplosion, surgeSeverity, makeBomb, groundYBelow,
                 SQUISHIES, EGGS, TEMPLATES, grant, input, reset(){ localStorage.removeItem(SAVE_KEY); location.reload(); } };
 
 /* first boot: the common egg from the spec, free, hatching on its own */

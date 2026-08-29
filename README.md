@@ -129,11 +129,12 @@ actually are to it, so a surge can catch you even mid-obstacle.
 There are none of these at all for the first **500m** of a run. From 500m, a
 burst is guaranteed to close **10%** of whatever gap you'd built up to the
 wall; from 1500m, **20%**; climbing another 10% every 1000m after that, up to
-a 60% cap so a very long run doesn't become an instant kill. The camera also
-pulls back during a surge to guarantee the wall is genuinely visible on
-screen — normally it only follows you, which can leave the wall well off the
-left edge if you've got a real lead, and "there's danger somewhere behind you"
-isn't much of a threat if you can't see it.
+a 60% cap so a very long run doesn't become an instant kill. Either way, the
+burst always closes the gap down to at least ~260px — enough that the wall
+genuinely comes into view — because the *wall* rushes to close the distance,
+not the camera. The camera keeps following you like normal; the burst speed
+is recalculated every single frame against your live position, so it can't
+be outrun even by a full sprint held the whole time.
 
 ## The background changes day to day
 
@@ -236,11 +237,17 @@ Everything is in `index.html`. No build step — edit, save, refresh.
 
 A round, dark little enemy that sits still until you get close (about a tile
 and a half), then arms — shaking harder and glowing hotter red the closer it
-gets to going off, with a ticking fuse that speeds up too. You've got about
-two seconds to either **stomp it** (same as any other enemy — safely defuses
-it, pays out on the combo like normal) or get clear. Left alone, it detonates:
-damages you if you're still in range, and clears out any other nearby enemies
-caught in the blast for a small bonus each.
+gets to going off, with a ticking fuse that speeds up too. Once armed it
+doesn't just sit there: it hops toward you every quarter-second or so for the
+whole two-second fuse, checking the ground ahead each hop so it won't lunge
+itself off a ledge into a pit. You've got until the fuse actually runs out to
+either **stomp it** (same as any other enemy — safely defuses it, pays out on
+the combo like normal) or get clear. The fuse is on its own clock regardless
+of whether it ever catches you — two seconds after arming, it goes off no
+matter where it's standing: damages you if you're still in range, and clears
+out any other nearby enemies caught in the blast for a small bonus each. It
+also leaves a small scorch-mark crater decal in the ground where it went off
+— purely cosmetic, doesn't touch the actual course geometry.
 
 The explosion itself is randomised — a random palette from four options, and
 one of four different shapes (a confetti burst, staggered shockwave rings, a
@@ -280,8 +287,9 @@ of course: **12 rows of exactly 16 characters**.
     onto it, not just walking past) launches a huge bounce -- not a mode
     switch, just a much bigger version of a normal jump. `TRAMPOLINE_BOUNCE`
     at the top of the file sets how high.
- M  bomb squishy -- stands still, arms when you get close, then a few
-    seconds later either you've stomped it (safe) or it detonates
+ M  bomb squishy -- stands still until you get close, then arms and hops
+    after you for two seconds -- either you've stomped it (safe) or it
+    detonates on its own clock and leaves a crater decal behind
     (`BOMB_FUSE`, `BOMB_PROX`, `BOMB_BLAST` up top control the timing and
     range).
     Ramps are 45 degrees and one tile each, so a hill is a diagonal staircase
@@ -478,6 +486,13 @@ own `gh-pages` branch, decoupled from `main`) for anyone with the old link.
 
 The version is shown on the main menu, under the title.
 
+- **v1.11.0** — the wall-surge visibility guarantee is now the *wall* rushing
+  to close the gap (recalculated every frame, so it can't be outrun by a
+  sprint), not the camera pulling back. The bomb squishy now hops after you
+  for the whole two-second fuse once armed (with ledge-avoidance so it won't
+  lunge itself into a pit) instead of just standing there, and always
+  detonates on its own clock regardless of whether it caught you, leaving a
+  small crater decal in the ground where it went off.
 - **v1.10.1** — surges now start at 500m instead of 1000m (severity re-anchors
   to the new start too, so it's a real 10% right away rather than "surges
   happen but do nothing" until 1000m).
