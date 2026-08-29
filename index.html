@@ -184,7 +184,7 @@
 "use strict";
 
 /* ------------------------------ constants ------------------------------ */
-const VERSION = "1.11.0";           // major.minor.patch -- bump minor for features
+const VERSION = "1.12.0";           // major.minor.patch -- bump minor for features
 
 const W = 960, H = 540;            // virtual resolution
 const TILE = 45;                   // tile size
@@ -214,34 +214,19 @@ const MAX_HEARTS   = 5;
 const STAR_TIME    = 11.05; // Super-Mario-style invincibility (8.5s + 30%)
 
 const WALL_BASE  = 85;    // squish wall speed at the start (px/s)
-const WALL_GAIN  = 0.066; // ...plus this much per metre travelled
-const WALL_MAX   = 305;
+const WALL_CAP   = 430;   // ...and the speed it endlessly creeps toward -- just
+                           // over SPRINT_RUN, so a long enough run eventually
+                           // becomes unwinnable no matter how well you play
+const WALL_TAU   = 4600;  // how many metres it takes to close most of the gap
+                           // to WALL_CAP -- by ~10,000m the wall is right up
+                           // against SPRINT_RUN and you can barely stop at all
 const WALL_LEASH = 950;   // if you get further ahead than this, it speeds up
-/* Every so often the wall telegraphs, then bursts to a much faster speed for
-   a couple of seconds -- turns "ambient pressure" into an occasional real
-   "sprint now or else" moment, on top of the normal distance-based speed. */
-const SURGE_MIN       = 9;    // seconds of calm before the next surge, at least
-const SURGE_MAX        = 15;
-const SURGE_WARN       = 1.1; // telegraph duration before the burst hits
-const SURGE_BURST      = 1.8; // how long the burst itself lasts
-const SURGE_START_DIST = 500;   // no surges at all before this distance
-const SURGE_STEP_DIST  = 1000;  // severity climbs another notch every this many metres after that
-const SURGE_STEP_PCT   = 0.10;  // ...by this much each time (10%, 20%, 30%, ...)
-const SURGE_MAX_PCT    = 0.60;  // ...capped here, or a late surge could be an instant kill
-// the camera never pans for a surge -- it's the WALL that has to actually
-// enter view. A burst always closes at least enough gap to land the wall
-// comfortably on screen (~80px in from the left edge), on top of whatever
-// the severity-based percentage adds once that's the bigger number
-const SURGE_VISIBLE_GAP = 260;
-// how much of the player-wall gap a burst is guaranteed to close, given how
-// far into the run you are: 0 before 500m, 10% right at 500m, 20% from
-// 1500m, 30% from 2500m, and so on up to the cap -- severity starts biting
-// immediately once surges begin, rather than "surges happen but do nothing"
-// for the first 1000m
-function surgeSeverity() {
-  if (run.dist < SURGE_START_DIST) return 0;
-  const step = Math.floor((run.dist - SURGE_START_DIST) / SURGE_STEP_DIST) + 1;
-  return Math.min(SURGE_MAX_PCT, SURGE_STEP_PCT * step);
+// smooth exponential approach to WALL_CAP -- no sudden bursts, just a wall
+// that's very slightly faster every metre you run, so the pressure never lets
+// up but never spikes either. Never actually reaches WALL_CAP, just gets
+// close enough that the difference stops mattering.
+function wallSpeedAt(dist) {
+  return WALL_CAP - (WALL_CAP - WALL_BASE) * Math.exp(-dist / WALL_TAU);
 }
 
 /* the magical carrot and the rainbow ride it launches you into */
@@ -385,8 +370,6 @@ const S = {
     setTimeout(() => sfx(55, 0.5, "square", 0.11, -20), 220);
     setTimeout(() => { sfx(440, 0.35, "square", 0.08, 660); sfx(220, 0.35, "sawtooth", 0.07, 220); }, 230);
   },
-  surgeWarn:  () => { [0,140,280].forEach((d,i)=>setTimeout(()=>sfx([300,340,380][i],0.13,"square",0.05,0),d)); },
-  surgeBurst: () => { sfx(160,0.28,"sawtooth",0.09,-60); setTimeout(()=>sfx(500,0.16,"square",0.06,300),40); },
   boing: () => { sfx(360, 0.1, "sine", 0.06, 260); setTimeout(() => sfx(520, 0.14, "triangle", 0.055, 140), 60); },
   carrot:() => [0, 70, 140, 210, 300, 400].forEach((d, i) =>
     setTimeout(() => sfx([523, 659, 784, 1046, 1318, 1568][i], 0.3, "triangle", 0.075), d)),
@@ -1119,8 +1102,7 @@ const player = { x:100, y:455, w:30, h:40, vx:0, vy:0, prevY:455, onGround:false
                  face:1, coyote:0, buffer:0, iframes:0, hearts:3, anim:0, squash:0, combo:0, airJumps:1, star:0,
                  slide:false, slopeDir:0, lastSlope:0, slopeGrace:0, slideSfx:0, runT:0, runDir:0,
                  power:null, flyFuel:FLY_TIME, flying:false, cloudMusic:0 };
-const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, camY:0, over:false, endT:0, startMs:0, rainbow:null,
-                 surgeState:"idle", surgeT:0, surgeTimer:0, surgeTargetGap:0 };
+const run    = { money:0, coins:0, stomps:0, dist:0, maxX:100, wallX:-420, camX:0, camY:0, over:false, endT:0, startMs:0, rainbow:null };
 const trail  = [];   // breadcrumb positions so the companion squishy can follow
 
 function startRun() {
@@ -1137,7 +1119,6 @@ function startRun() {
   run.maxX = 100; run.wallX = -420; run.camX = 0; run.camY = 0; run.over = false; run.endT = 0;
   run.startMs = performance.now();   // wall-clock length of the run, for the leaderboard's speed check
   run.rainbow = null;
-  run.surgeState = "idle"; run.surgeT = 0; run.surgeTimer = 14 + Math.random() * 6;   // a little breathing room first
   run.nextMilestone = MILESTONES[0];
   world.milestone = null;
   trail.length = 0;
@@ -1682,43 +1663,9 @@ function updatePlay(dt) {
   /* ---- keep the course built ahead of the player ---- */
   while ((player.x + 3 * CHUNK_W) > (world.built + 1) * CHUNK_W) buildChunk(world.built + 1);
 
-  /* ---- the squish wall, with the occasional telegraphed surge ---- */
+  /* ---- the squish wall, endlessly and smoothly getting faster ---- */
   if (!run.over) {
-    if (run.surgeState === "idle") {
-      if (run.dist >= SURGE_START_DIST) {
-        run.surgeTimer -= dt;
-        if (run.surgeTimer <= 0) { run.surgeState = "warn"; run.surgeT = 0; S.surgeWarn(); }
-      }
-    } else if (run.surgeState === "warn") {
-      run.surgeT += dt;
-      if (run.surgeT >= SURGE_WARN) {
-        run.surgeState = "burst"; run.surgeT = 0; S.surgeBurst(); game.shake = Math.max(game.shake, 5);
-        // the TARGET gap this burst must hit by the time it ends -- whichever
-        // is smaller (more aggressive) of the severity-based percentage and
-        // the guaranteed-visible minimum
-        const startGap = Math.max(0, player.x - run.wallX);
-        const pctTargetGap = startGap * (1 - surgeSeverity());
-        run.surgeTargetGap = Math.min(pctTargetGap, SURGE_VISIBLE_GAP);
-      }
-    } else if (run.surgeState === "burst") {
-      run.surgeT += dt;
-      if (run.surgeT >= SURGE_BURST) {
-        run.surgeState = "idle"; run.surgeT = 0;
-        run.surgeTimer = SURGE_MIN + Math.random() * (SURGE_MAX - SURGE_MIN);
-      }
-    }
-    const baseWs = Math.min(WALL_MAX, WALL_BASE + run.dist * WALL_GAIN);
-    let ws = baseWs;
-    if (run.surgeState === "burst") {
-      // recomputed every frame, not just once at burst-start -- if the
-      // player speeds up mid-burst, the required closure re-targets itself
-      // instead of being outrun by a fixed speed set at the start
-      const gap = Math.max(0, player.x - run.wallX);
-      const remainT = Math.max(0.05, SURGE_BURST - run.surgeT);
-      const needed = Math.max(0, gap - run.surgeTargetGap);
-      ws = baseWs + needed / remainT;
-    }
-    run.wallX += ws * dt;
+    run.wallX += wallSpeedAt(run.dist) * dt;
     const lead = player.x - run.wallX;
     if (lead > WALL_LEASH) run.wallX += (lead - WALL_LEASH) * 1.7 * dt;  // no camping far ahead
     if (run.wallX + 30 > player.x + 8) { endRun("wall"); }
@@ -2888,21 +2835,6 @@ function drawWallWarning(camX, t) {
     g.addColorStop(0, "rgba(255,80,150," + (0.5 * heat).toFixed(3) + ")");
     g.addColorStop(1, "rgba(255,80,150,0)");
     ctx.fillStyle = g; ctx.fillRect(0, 0, W * 0.55, H);
-  }
-  // the surge telegraph fires regardless of how close the wall currently is --
-  // it's a "something's coming" cue, not a proximity indicator
-  if (!run.over && run.surgeState === "warn") {
-    const pulse = 0.5 + 0.5 * Math.sin(t * 22);
-    ctx.fillStyle = "rgba(255,60,40," + (0.16 + 0.14 * pulse).toFixed(3) + ")";
-    ctx.fillRect(0, 0, W, H);
-    ctx.font = "900 22px ui-rounded,system-ui,sans-serif";
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.globalAlpha = 0.55 + 0.45 * pulse;
-    ctx.lineWidth = 4; ctx.strokeStyle = "rgba(120,20,20,.6)";
-    ctx.strokeText("WALL SURGE!", W / 2, 46);
-    ctx.fillStyle = "#ffe0d0";
-    ctx.fillText("WALL SURGE!", W / 2, 46);
-    ctx.globalAlpha = 1;
   }
 }
 
@@ -4132,7 +4064,7 @@ window.__SE = { game, save, player, run, world, startRun, goHub, beginHatch, per
                 moveBody, APEX_BAND, APEX_GRAVITY_MULT, GRAVITY,
                 tileAtPx, isSolidPx, bumpBrick, equippedPower,
                 PALETTES, ACCESSORIES, currentPalette, squishyPalette, accessoryUnlocked,
-                THEMES, THEME, detonateBomb, spawnExplosion, surgeSeverity, makeBomb, groundYBelow,
+                THEMES, THEME, detonateBomb, spawnExplosion, wallSpeedAt, makeBomb, groundYBelow,
                 SQUISHIES, EGGS, TEMPLATES, grant, input, reset(){ localStorage.removeItem(SAVE_KEY); location.reload(); } };
 
 /* first boot: the common egg from the spec, free, hatching on its own */

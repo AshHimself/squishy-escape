@@ -118,23 +118,18 @@ The dumpling glows with a cycling rainbow rim and the music switches to a fast
 The one thing the star does *not* save you from is the squish wall. That still
 ends the run, so keep moving.
 
-## The wall surges
+## The wall never stops speeding up
 
-Every so often the squish wall does more than just creep — it telegraphs (a
-pulsing red flash and "WALL SURGE!" across the top of the screen), then, a
-little over a second later, bursts forward for about two seconds before
-settling back down. It's on its own timer, independent of how close you
-actually are to it, so a surge can catch you even mid-obstacle.
-
-There are none of these at all for the first **500m** of a run. From 500m, a
-burst is guaranteed to close **10%** of whatever gap you'd built up to the
-wall; from 1500m, **20%**; climbing another 10% every 1000m after that, up to
-a 60% cap so a very long run doesn't become an instant kill. Either way, the
-burst always closes the gap down to at least ~260px — enough that the wall
-genuinely comes into view — because the *wall* rushes to close the distance,
-not the camera. The camera keeps following you like normal; the burst speed
-is recalculated every single frame against your live position, so it can't
-be outrun even by a full sprint held the whole time.
+The squish wall doesn't creep at a flat pace — it's very slightly faster
+every metre you run, smoothly and continuously, no sudden bursts or
+telegraphs. Early on the difference is barely noticeable; by the time you're
+a few thousand metres in, staying ahead takes real, sustained effort; and by
+around **10,000m** it's close enough to your own top sprint speed that you
+can barely afford to stop moving at all — any real hesitation and it catches
+you. Push past roughly **12,000m** and the wall is at or past your max speed
+outright, so an outrageously long run eventually becomes unwinnable no
+matter how well you're playing — that's by design, not a bug: there has to
+be a ceiling somewhere.
 
 ## The background changes day to day
 
@@ -334,7 +329,7 @@ Three rules so the course stays possible:
   next egg costs. `RARITY` / `RARITY_BG` / `RARITY_INK` all need a matching
   entry if you add another tier.
 - The constants at the top — `JUMP_V`, `MAX_RUN`, `GRAVITY`, `WALL_BASE`,
-  `WALL_MAX` — control how it feels. Turn `WALL_BASE` down to make it kinder.
+  `WALL_CAP` — control how it feels. Turn `WALL_BASE` down to make it kinder.
   `DOUBLE_V` is how strong the mid-air bounce is compared to a normal jump.
   `COYOTE` and `JUMP_BUFFER` are the two forgiveness windows around a jump —
   how long after walking off a ledge it still fires, and how early a press
@@ -342,17 +337,16 @@ Three rules so the course stays possible:
   top of a jump (how wide the "near the top" window is, and how much weaker
   gravity feels inside it) — this only ever affects the player, `moveBody`'s
   gravity is a per-call parameter so enemies and movers are untouched.
-  `SURGE_MIN` / `SURGE_MAX` / `SURGE_WARN` / `SURGE_BURST` / `SURGE_MULT` tune
-  the wall's periodic surges — how often, how long the telegraph and the burst
-  each last, and how much faster the burst is. `THEMES` is the list of
-  background looks; add another entry (four colours, plus `sun`/`night`/`storm`
-  flags) and it joins the daily rotation automatically.
+  `THEMES` is the list of background looks; add another entry (four colours,
+  plus `sun`/`night`/`storm` flags) and it joins the daily rotation
+  automatically.
   `RUN_ACCEL` sets how quickly it gets up to speed, `SPRINT_RUN` how fast the
   wind-up sprint goes, and `SLIDE_ACCEL` / `SLIDE_MAX` how fierce a slope
   slide is. `WOOD_SHAKE` and `WOOD_BACK` are the plank's warning wobble and
   how long it takes to rebuild. `BRICK_HITS` is how many headbutts a brick takes to burst.
-  `WALL_BASE` / `WALL_GAIN` / `WALL_MAX` control the wall's steady speed
-  (separate from the surges above).
+  `WALL_BASE` / `WALL_CAP` / `WALL_TAU` control the wall's speed curve —
+  `wallSpeedAt(dist)` eases smoothly from `WALL_BASE` toward `WALL_CAP`, and
+  `WALL_TAU` sets how many metres that takes (bigger = slower ramp-up).
   `POWER_SPEED_MULT` / `POWER_JUMP_MULT` / `POWER_BIG_SCALE` / `FLY_TIME` /
   `FLY_LIFT` are the four superpowers' strength.
 - `SECTIONS` — the music. Each entry is 16 sixteenth-notes: `lead` is a list of
@@ -486,6 +480,13 @@ own `gh-pages` branch, decoupled from `main`) for anyone with the old link.
 
 The version is shown on the main menu, under the title.
 
+- **v1.12.0** — removed the wall's telegraphed surges entirely. In their
+  place, the wall's speed is now one smooth, continuous curve that eases from
+  its old starting speed toward a cap just above your own top sprint speed —
+  no more sudden bursts, just steadily mounting pressure the whole run. By
+  around 10,000m you can barely afford to stop at all; past roughly 12,000m
+  the wall is at or past max sprint speed outright, so an extreme enough run
+  eventually becomes unwinnable no matter how well you're playing.
 - **v1.11.0** — the wall-surge visibility guarantee is now the *wall* rushing
   to close the gap (recalculated every frame, so it can't be outrun by a
   sprint), not the camera pulling back. The bomb squishy now hops after you
